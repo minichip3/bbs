@@ -3,12 +3,19 @@ import tty
 import termios
 from wcwidth import wcwidth
 
-def rawprint(text: str, encoding='utf-8'):
+current_encoding = 'utf-8'
+
+def set_encoding(enc):
+    global current_encoding
+    current_encoding = enc
+
+def rawprint(text: str, encoding=None):
+    if encoding is None:
+        encoding = current_encoding
     try:
         encoded = text.encode(encoding, errors='replace')
-        decoded = encoded.decode(encoding, errors='replace')
-        sys.stdout.write(decoded)
-        sys.stdout.flush()
+        sys.stdout.buffer.write(encoded)
+        sys.stdout.buffer.flush()
     except Exception as e:
         sys.stdout.write(f"[출력 오류] {e}\n")
 
@@ -22,7 +29,9 @@ def getchar():
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
 
-def rawinput(prompt='', encoding='utf-8') -> str:
+def rawinput(prompt='', encoding=None) -> str:
+    if encoding is None:
+        encoding = current_encoding
     rawprint(prompt, encoding)
     buffer = []
     while True:
@@ -60,7 +69,9 @@ def rawinput(prompt='', encoding='utf-8') -> str:
                 rawprint(ch, encoding)
             # else: ignore zero-width characters
 
-def hidden_input(prompt='비밀번호: ', encoding='utf-8') -> str:
+def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
+    if encoding is None:
+        encoding = current_encoding
     rawprint(prompt, encoding)
     buffer = []
     while True:
