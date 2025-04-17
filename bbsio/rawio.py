@@ -39,7 +39,7 @@ def rawinput(prompt='', encoding=None) -> str:
         if ch in ('\n', '\r'):
             rawprint('\n', encoding)
             return ''.join(buffer)
-        elif ch == '\x7f':  # Backspace
+        elif ord(ch) in (8, 127):  # Backspace: ^H or DEL
             if buffer:
                 last = buffer.pop()
                 width = wcwidth(last)
@@ -79,14 +79,14 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
         if ch in ('\n', '\r'):
             rawprint('\n', encoding)
             return ''.join(buffer)
-        elif ch == '\x7f':  # Backspace
+        elif ord(ch) in (8, 127):  # Backspace: ^H or DEL
             if buffer:
                 last = buffer.pop()
                 width = wcwidth(last)
                 if width > 0:
-                    rawprint('\x1b[{}D'.format(1), encoding)
+                    rawprint('\x1b[{}D'.format(width), encoding)
                     rawprint(' ', encoding)
-                    rawprint('\x1b[{}D'.format(1), encoding)
+                    rawprint('\x1b[{}D'.format(width), encoding)
         elif ch == '\x1b':  # Escape sequence
             seq = ch + getchar()
             if seq.endswith('['):
