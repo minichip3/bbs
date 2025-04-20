@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from bbsio.rawio import rawprint, rawinput
+from bbsio.rawio import rawprint, rawinput, command_input
 from bbsio.tui import get_screen_size
 from wcwidth import wcswidth
 
@@ -85,6 +85,7 @@ def write_post(username, posts, board_id):
 
 
 def main_menu(username):
+    from core.command import handle_global_command
     while True:
         rawprint("\x1b[2J\x1b[H")  # Clear screen
         boards = load_boards()
@@ -109,16 +110,8 @@ def main_menu(username):
         
         rawprint("-" * width + "\n")
 
-        rawprint("번호/명령 (1~{},X)\n > ".format(len(boards)))
-        choice = rawinput("").strip().lower()
+        choice = command_input("번호/명령 (X: 종료)\n > ").strip().lower()
 
-        if choice == 'x':
-            confirm = rawinput("정말 로그아웃하시겠습니까? (Y/N): ").strip().lower()
-            if confirm == 'y':
-                rawprint("로그아웃합니다.\n")
-                exit(0)
-            else:
-                continue
         try:
             selection = int(choice)
             if 1 <= selection <= len(boards):
@@ -143,6 +136,7 @@ def main_menu(username):
 
 
 def board_menu(username, board, posts):
+    from core.command import handle_global_command
     while True:
         width, _ = get_screen_size()
         rawprint("\x1b[2J\x1b[H")  # Clear screen
@@ -170,10 +164,9 @@ def board_menu(username, board, posts):
                 rawprint(line + "\n")
 
         rawprint("-" * width + "\n")
-        rawprint("명령어 (번호: 보기, W: 쓰기, ED: 수정, DD: 삭제, B: 뒤로)\n > ")
-        cmd = rawinput().strip().lower()
+        cmd = command_input("번호/명령 (W: 쓰기, ED: 수정, DD: 삭제, P: 뒤로)\n > ").strip().lower()
 
-        if cmd == 'b':
+        if cmd == 'p':
             break
         elif cmd == 'w':
             if board_type == 'restricted' and username != 'sysop':
@@ -194,7 +187,5 @@ def board_menu(username, board, posts):
                     view_post(posts[sel - 1])
                 else:
                     rawprint("잘못된 번호입니다.\n")
-                    rawinput("계속하려면 Enter를 누르세요.\n")
             except ValueError:
                 rawprint("잘못된 명령입니다.\n")
-                rawinput("계속하려면 Enter를 누르세요.\n")

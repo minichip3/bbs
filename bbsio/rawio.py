@@ -115,3 +115,56 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
             if width > 0:
                 buffer.append(ch)
                 rawprint('*', encoding)
+
+def command_input(prompt=' > ', encoding=None) -> str:
+    """
+    명령어 입력 전용 함수.
+    - prompt 출력 후 명령어를 한 줄로 입력받음.
+    - 글로벌 명령어가 감지되면 handle_global_command() 호출.
+    """
+    if encoding is None:
+        encoding = current_encoding
+
+    from core.command import is_global_command, handle_global_command
+
+    while True:
+        rawprint(prompt, encoding)
+        buffer = []
+        while True:
+            ch = getchar()
+            if ch in ('\n', '\r'):
+                rawprint('\n', encoding)
+                command = ''.join(buffer).strip()
+                if is_global_command(command):
+                    handled = handle_global_command(command)
+                    if handled:
+                        continue  # 다시 입력 받기
+                return command
+            elif ord(ch) in (8, 127):  # Backspace
+                if buffer:
+                    last = buffer.pop()
+                    width = wcwidth(last)
+                    if width > 0:
+                        rawprint('\x1b[{}D'.format(width), encoding)
+                        rawprint(' ' * width, encoding)
+                        rawprint('\x1b[{}D'.format(width), encoding)
+            elif ch == '\x1b':
+                seq = ch + getchar()
+                if seq.endswith('['):
+                    while True:
+                        c = getchar()
+                        seq += c
+                        if c.isalpha():
+                            break
+                    continue
+                elif seq in ('\x1bOP', '\x1bOQ', '\x1bOR', '\x1bOS'):
+                    continue
+                else:
+                    continue
+            elif ch == '\t':
+                continue
+            else:
+                width = wcwidth(ch)
+                if width > 0:
+                    buffer.append(ch)
+                    rawprint(ch, encoding)
