@@ -1,12 +1,12 @@
 from core.login import login_menu
 from core.init import initialize
-from bbsio.rawio import set_encoding
+from bbsio.rawio import set_encoding, rawprint
 
 def select_locale():
     print("사용할 문자 인코딩을 선택하세요:")
-    print("1. UTF-8")
-    print("2. EUC-KR")
-    print("3. JOHAB")
+    rawprint("1. 이 글자가 보이면 UTF-8 입니다.\n", 'utf-8')
+    rawprint("2. 이 글자가 보이면 완성형 입니다.\n", 'euc-kr')
+    rawprint("3. 이 글자가 보이면 조합형 입니다.\n", 'johab')
     print()
     choice = input("선택 (1~3): ").strip()
     if choice == '1':

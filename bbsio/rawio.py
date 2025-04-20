@@ -24,7 +24,15 @@ def getchar():
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = sys.stdin.read(1)
+        byte = sys.stdin.buffer.read(1)
+        while True:
+            try:
+                ch = byte.decode(current_encoding)
+                return ch
+            except UnicodeDecodeError:
+                # 한글 EUC-KR처럼 멀티바이트 문자일 경우 계속 읽음
+                byte += sys.stdin.buffer.read(1)
+
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
