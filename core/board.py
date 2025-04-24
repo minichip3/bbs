@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from bbsio.rawio import rawprint, rawinput, command_input
+from bbsio.rawio import rawprint, rawinput, command_input, multiline_input
 from bbsio.tui import get_screen_size
 from wcwidth import wcswidth
 
@@ -46,14 +46,58 @@ def save_posts(posts):
 
 
 def view_post(post):
-    rawprint("\x1b[2J\x1b[H")  # Clear screen
-    rawprint(f"제목: {post['title']}\n")
-    rawprint(f"작성자: {post['author']}  작성일: {post['date']}\n")
-    rawprint("-" * 40 + "\n")
-    rawprint(post['content'] + "\n")
-    rawprint("-" * 40 + "\n")
-    rawinput("계속하려면 Enter를 누르세요.\n")
+    width, height = get_screen_size()
+    lines = post['content'].splitlines()
+    lines_per_page = max(1, height - 7)  # Reserve lines for headers, footers, and command input
+    page = 0
 
+    while True:
+        try:
+            rawprint("\x1b[2J\x1b[H")  # Clear screen
+            title = f"제목: {post['title']}"
+            author_info = f"작성자: {post['author']}  작성일: {post['date']}"
+
+            gap = max(2, width - wcswidth(title) - wcswidth(datetime.now().strftime('%y/%m/%d  %H:%M')))
+            rawprint("-" * width + "\n")
+            rawprint(f"{title}{' ' * gap}{datetime.now().strftime('%y/%m/%d  %H:%M')}\n")
+            rawprint(f"{author_info}\n")
+            rawprint("-" * width + "\n")
+
+            start = page * lines_per_page
+            end = start + lines_per_page
+            paged_lines = lines[start:end]
+
+            for line in paged_lines:
+                if wcswidth(line) > width:
+                    trimmed = ""
+                    for char in line:
+                        if wcswidth(trimmed + char) >= width:
+                            break
+                        trimmed += char
+                    rawprint(trimmed + "...\n")
+                else:
+                    rawprint(line + "\n")
+
+            rawprint("-" * width + "\n")
+            cmd = command_input("명령 (ED: 수정, DD: 삭제, F: 다음, B: 이전, P: 뒤로)\n > ").strip().lower()
+
+            if cmd == 'ed':
+                rawprint("[편집 기능은 아직 구현되지 않았습니다.]\n")
+            elif cmd == 'dd':
+                rawprint("[삭제 기능은 아직 구현되지 않았습니다.]\n")
+            elif cmd == '' and end < len(lines):
+                page += 1
+            elif cmd == 'f' and end < len(lines):
+                page += 1
+            elif cmd == 'b' and page > 0:
+                page -= 1
+            elif cmd == 'p':
+                break
+            else:
+                rawprint("잘못된 명령입니다.\n")
+        except KeyboardInterrupt:
+            break
+    
 
 def show_board(posts):
     rawprint("\n게시판 목록:\n")
@@ -68,10 +112,8 @@ def show_board(posts):
 
 
 def write_post(username, posts, board_id):
-    rawprint("제목: ")
-    title = input()
-    rawprint("내용: ")
-    content = input()
+    title = rawinput("제목: ")
+    content = multiline_input()
     post = {
         'board': board_id,
         'author': username,
@@ -137,55 +179,65 @@ def main_menu(username):
 
 def board_menu(username, board, posts):
     from core.command import handle_global_command
+    page = 0
     while True:
-        width, _ = get_screen_size()
-        rawprint("\x1b[2J\x1b[H")  # Clear screen
-        board_name = board['name']
-        board_type = board.get('type', 'normal')
-        board_id = board['id']
-        header = f"{board_name}"
-        now = datetime.now().strftime('%y/%m/%d  %H:%M')
+        try:
+            width, height = get_screen_size()
+            posts_per_page = max(1, height - 6)  # Reserve lines for UI/header/footer
+            start = page * posts_per_page
+            end = start + posts_per_page
+            current_posts = posts[start:end]
 
-        rawprint("-" * width + "\n")
-        gap = max(2, width - wcswidth(header) - wcswidth(now))
-        rawprint(f"{header}{' ' * gap}{now}\n")
-        rawprint("-" * width + "\n")
+            rawprint("\x1b[2J\x1b[H")  # Clear screen
+            board_name = board['name']
+            board_type = board.get('type', 'normal')
+            board_id = board['id']
+            total_pages = (len(posts) + posts_per_page - 1) // posts_per_page
+            header = f"{board_name} ({page + 1} / {total_pages})"
 
-        if not posts:
-            rawprint("(게시글이 없습니다)\n")
-        else:
-            for i, post in enumerate(posts):
-                title = post['title']
-                author = post['author']
-                date = post['date']
-                line = f"{i+1:>2}. {title} / {author} / {date}"
-                if wcswidth(line) > width:
-                    line = line[:width - 3] + "..."
-                rawprint(line + "\n")
+            rawprint("-" * width + "\n")
+            gap = max(2, width - wcswidth(header) - wcswidth(datetime.now().strftime('%y/%m/%d  %H:%M')))
+            rawprint(f"{header}{' ' * gap}{datetime.now().strftime('%y/%m/%d  %H:%M')}\n")
+            rawprint("-" * width + "\n")
 
-        rawprint("-" * width + "\n")
-        cmd = command_input("번호/명령 (W: 쓰기, ED: 수정, DD: 삭제, P: 뒤로)\n > ").strip().lower()
-
-        if cmd == 'p':
-            break
-        elif cmd == 'w':
-            if board_type == 'restricted' and username != 'sysop':
-                rawprint("이 게시판에서는 글쓰기가 제한되어 있습니다.\n")
-                rawinput("계속하려면 Enter를 누르세요.\n")
+            if not posts:
+                rawprint("(게시글이 없습니다)\n")
             else:
-                write_post(username, posts, board_id)
-        elif cmd == 'ed':
-            rawprint("글 수정 기능은 아직 구현되지 않았습니다.\n")
-            rawinput("계속하려면 Enter를 누르세요.\n")
-        elif cmd == 'dd':
-            rawprint("글 삭제 기능은 아직 구현되지 않았습니다.\n")
-            rawinput("계속하려면 Enter를 누르세요.\n")
-        else:
-            try:
-                sel = int(cmd)
-                if 1 <= sel <= len(posts):
-                    view_post(posts[sel - 1])
+                for i, post in enumerate(current_posts):
+                    title = post['title']
+                    author = post['author']
+                    date = post['date']
+                    line = f"{start + i + 1:>2}. {title} / {author} / {date}"
+                    if wcswidth(line) > width:
+                        line = line[:width - 3] + "..."
+                    rawprint(line + "\n")
+
+            rawprint("-" * width + "\n")
+            cmd = command_input("번호/명령 (W: 쓰기, F: 다음, B: 이전, P: 뒤로)\n > ").strip().lower()
+
+            if cmd == 'w':
+                if board_type == 'restricted' and username != 'sysop':
+                    rawprint("이 게시판에서는 글쓰기가 제한되어 있습니다.\n")
+                    rawinput("계속하려면 Enter를 누르세요.\n")
                 else:
-                    rawprint("잘못된 번호입니다.\n")
-            except ValueError:
-                rawprint("잘못된 명령입니다.\n")
+                    write_post(username, posts, board_id)
+            elif cmd == '' and (page + 1) * posts_per_page < len(posts):
+                page += 1
+                continue
+            elif cmd == 'f' and (page + 1) * posts_per_page < len(posts):
+                page += 1
+                continue
+            elif cmd == 'b' and page > 0:
+                page -= 1
+                continue
+            else:
+                try:
+                    sel = int(cmd)
+                    if 1 <= sel <= len(posts):
+                        view_post(posts[sel - 1])
+                    else:
+                        rawprint("잘못된 번호입니다.\n")
+                except ValueError:
+                    rawprint("잘못된 명령입니다.\n")
+        except KeyboardInterrupt:
+            break
