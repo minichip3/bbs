@@ -1,7 +1,7 @@
 import sys
 import tty
 import termios
-from wcwidth import wcwidth
+from wcwidth import wcwidth, wcswidth
 
 current_encoding = 'utf-8'
 
@@ -168,3 +168,52 @@ def command_input(prompt=' > ', encoding=None) -> str:
                 if width > 0:
                     buffer.append(ch)
                     rawprint(ch, encoding)
+
+def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', encoding=None):
+    if encoding is None:
+        encoding = current_encoding
+
+    rawprint(prompt + '\n', encoding)
+    lines = [""]
+    current_line = 0
+
+    while True:
+        ch = getchar()
+        if ch in ('\n', '\r'):
+            if lines[current_line].strip() == ".":
+                return "\n".join(lines[:-1])
+            lines.append("")
+            current_line += 1
+            rawprint('\n', encoding)
+        elif ord(ch) in (8, 127):  # Backspace
+            if lines[current_line]:
+                last = lines[current_line][-1]
+                width = wcwidth(last)
+                lines[current_line] = lines[current_line][:-1]
+                if width > 0:
+                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint(' ' * width, encoding)
+                    rawprint('\x1b[{}D'.format(width), encoding)
+            else:
+                if current_line > 0:
+                    lines.pop()
+                    current_line -= 1
+                    rawprint('\x1b[F', encoding)  # Move cursor up one line
+                    rawprint('\r' + ' ' * wcswidth(lines[current_line]) + '\r', encoding)  # Clear line
+                    rawprint(lines[current_line], encoding)
+        elif ch == '\x1b':  # Skip escape sequences
+            seq = ch + getchar()
+            if seq.endswith('['):
+                while True:
+                    c = getchar()
+                    seq += c
+                    if c.isalpha():
+                        break
+            continue
+        elif ch == '\t':
+            continue
+        else:
+            width = wcwidth(ch)
+            if width > 0:
+                lines[current_line] += ch
+                rawprint(ch, encoding)

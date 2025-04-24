@@ -4,9 +4,8 @@ from bbsio.rawio import rawinput, rawprint
 def is_global_command(cmd: str) -> bool:
     """
     글로벌 명령어인지 확인합니다.
-    현재는 'x' 또는 'X' (종료 명령어)만 처리합니다.
     """
-    return cmd.lower() == 'x'
+    return cmd.lower() in ['x', 'p']
 
 def handle_global_command(cmd: str) -> bool:
     """
@@ -16,6 +15,8 @@ def handle_global_command(cmd: str) -> bool:
     """
     if cmd.lower() == 'x':
         return exit_program()
+    elif cmd.lower() == 'p':
+        raise KeyboardInterrupt
     return False
 
 def exit_program() -> bool:
