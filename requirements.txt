@@ -1,0 +1,5 @@
+pyserial
+telnetlib3
+wcwidth
+flask
+flask_socketio
