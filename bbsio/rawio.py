@@ -1,13 +1,35 @@
 import sys
+import select
 import tty
 import termios
 from wcwidth import wcwidth, wcswidth
 
 current_encoding = 'utf-8'
 
+# 모뎀→PTY 중계가 죽거나 회선이 소리소문없이 끊겨도 getchar()가 여기서
+# 영원히 블로킹해선 안 된다 (이게 "랜덤 프리징"의 핵심 원인이었음).
+# 이 시간 동안 입력이 전혀 없으면 SessionIdleTimeout을 던진다.
+IDLE_TIMEOUT_SECONDS = 180
+
+class SessionIdleTimeout(Exception):
+    pass
+
 def set_encoding(enc):
     global current_encoding
     current_encoding = enc
+
+def flush_input():
+    """이미 도착해 입력 버퍼에 쌓여 있는 바이트를 전부 버린다.
+    클라이언트 쪽 화면 렌더링이 느려서(예: minicom 한글 렌더 지연)
+    사용자가 다음 프롬프트가 뜨기 전에 미리 타이핑한 키 입력이,
+    화면에는 아직 안 보이던 이전 프롬프트/배너의 답으로 오인되는 것을 막는다.
+    새 프롬프트 문구를 출력하기 '직전'에만 호출해야 한다 - 출력 후에
+    호출하면 사용자가 프롬프트를 보고 바로 친, 정당한 빠른 입력까지
+    같이 버려질 수 있다."""
+    try:
+        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except termios.error:
+        pass
 
 def rawprint(text: str, encoding=None):
     if encoding is None:
@@ -19,19 +41,29 @@ def rawprint(text: str, encoding=None):
     except Exception as e:
         sys.stdout.write(f"[출력 오류] {e}\n")
 
+def _read_byte_with_timeout(fd):
+    ready, _, _ = select.select([fd], [], [], IDLE_TIMEOUT_SECONDS)
+    if not ready:
+        raise SessionIdleTimeout(f'{IDLE_TIMEOUT_SECONDS}초간 입력 없음')
+    byte = sys.stdin.buffer.read(1)
+    if not byte:
+        # PTY 반대편(모뎀 중계)이 닫힘 - 회선이 끊긴 것으로 간주
+        raise SessionIdleTimeout('입력 스트림 종료(EOF)')
+    return byte
+
 def getchar():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        byte = sys.stdin.buffer.read(1)
+        byte = _read_byte_with_timeout(fd)
         while True:
             try:
                 ch = byte.decode(current_encoding)
                 return ch
             except UnicodeDecodeError:
                 # 한글 EUC-KR처럼 멀티바이트 문자일 경우 계속 읽음
-                byte += sys.stdin.buffer.read(1)
+                byte += _read_byte_with_timeout(fd)
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -40,6 +72,7 @@ def getchar():
 def rawinput(prompt='', encoding=None) -> str:
     if encoding is None:
         encoding = current_encoding
+    flush_input()
     rawprint(prompt, encoding)
     buffer = []
     while True:
@@ -80,6 +113,7 @@ def rawinput(prompt='', encoding=None) -> str:
 def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
     if encoding is None:
         encoding = current_encoding
+    flush_input()
     rawprint(prompt, encoding)
     buffer = []
     while True:
@@ -128,6 +162,7 @@ def command_input(prompt=' > ', encoding=None) -> str:
     from core.command import is_global_command, handle_global_command
 
     while True:
+        flush_input()
         rawprint(prompt, encoding)
         buffer = []
         while True:
@@ -173,6 +208,7 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
     if encoding is None:
         encoding = current_encoding
 
+    flush_input()
     rawprint(prompt + '\n', encoding)
     lines = [""]
     current_line = 0
