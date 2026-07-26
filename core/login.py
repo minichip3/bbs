@@ -80,6 +80,16 @@ def _label(text):
     return pad(text, LABEL_WIDTH)
 
 
+def _draw_minimal_header():
+    """접속 배너 전체를 다시 그리지 않고, 상단바만 새로 그려서 화면을
+    초기화한다 (아래 참고)."""
+    width, _ = get_screen_size()
+    clear_screen()
+    draw_top_bar(SITE_NAME, datetime.now().strftime('%y/%m/%d %H:%M'), width)
+    rawprint('\n')
+    return width
+
+
 def login_prompt(users):
     """ID/비밀번호를 받아 로그인 처리. 성공 시 username, 취소 시 None,
     종료 요청 시 'QUIT' 문자열을 반환한다."""
@@ -93,7 +103,15 @@ def login_prompt(users):
         return None
 
     tries = 0
+    last_error = ''
     while tries < MAX_LOGIN_TRY:
+        # 접속 배너 + 로그인 안내 박스 + ID 프롬프트까지 이미 화면 한 칸을
+        # 거의 다 채운 상태라, 그 위에 비밀번호 프롬프트/오류 메시지를 계속
+        # 이어붙이면 80x24 화면 기준으로 위쪽(상단바)이 스크롤되어 잘려
+        # 나간다. 매 시도마다 화면을 지우고 상단바만 새로 그려서 시작한다.
+        width = _draw_minimal_header()
+        if last_error:
+            rawprint(C_ERR + last_error + RESET)
         password = hidden_input(C_TITLE + f" {_label('비밀번호')} : " + RESET)
         hashed = hashlib.sha256(password.encode()).hexdigest()
 
@@ -105,8 +123,7 @@ def login_prompt(users):
             users[user_id]['last_login'] = now
             save_users(users)
 
-            width, _ = get_screen_size()
-            rawprint('\n')
+            width = _draw_minimal_header()
             box_top(width, '로그인 성공')
             box_line(f"{user_info.get('name', user_id)}({user_id})님, 반갑습니다!", width)
             if last_login:
@@ -123,7 +140,7 @@ def login_prompt(users):
         tries += 1
         remain = MAX_LOGIN_TRY - tries
         if remain > 0:
-            rawprint(C_ERR + f"\n 비밀번호가 일치하지 않습니다. (남은 시도: {remain}회)\n" + RESET)
+            last_error = f"\n 비밀번호가 일치하지 않습니다. (남은 시도: {remain}회)\n\n"
         else:
             rawprint(C_ERR + "\n 비밀번호를 3회 잘못 입력하였습니다. 접속을 종료합니다.\n" + RESET)
             sys.exit(0)
