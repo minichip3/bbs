@@ -33,11 +33,11 @@ BG_BLACK = '\x1b[40m'
 BG_BLUE = '\x1b[44m'
 BG_CYAN = '\x1b[46m'
 
-# 이 BBS 전체에서 쓰는 "톤" - 테두리는 청록, 제목/강조는 노랑, 본문은 흰색
-C_BORDER = FG_CYAN
+# 이 BBS 전체에서 쓰는 "톤" - 거의 모노크롬(흰색), 노랑만 강조색으로 씀
+C_BORDER = FG_WHITE
 C_TITLE = BOLD + FG_YELLOW
 C_TEXT = FG_WHITE
-C_DIM = DIM + FG_CYAN
+C_DIM = DIM
 C_OK = BOLD + FG_GREEN
 C_ERR = BOLD + FG_RED
 C_HILITE = BOLD + FG_WHITE
