@@ -8,6 +8,21 @@ from wcwidth import wcwidth, wcswidth
 
 current_encoding = 'utf-8'
 
+# 어느 경로(모뎀 다이얼업 vs 텔넷)로 들어온 접속인지 - dialup.py/telnet.py가
+# bbs.py를 띄울 때 --channel=modem/--channel=telnet 인자로 알려주면
+# bbs.py가 set_channel()로 기록한다. 나중에 DUN(전화 접속 전용 PPP
+# 서비스) 같은, 채널에 따라 메뉴를 다르게 보여줘야 하는 기능의 기반이다.
+current_channel = 'unknown'
+
+
+def set_channel(channel):
+    global current_channel
+    current_channel = channel
+
+
+def get_channel():
+    return current_channel
+
 # 일부 클라이언트(이야기 등)가 ESC[0m(RESET)을 완전히 처리하지 못해서,
 # 굵게/색 있는 프롬프트 문구 뒤에 사용자가 타이핑한 글자가 그 스타일을
 # 그대로 물려받아 보이는 현상이 있었다 (예: 노란 프롬프트 뒤에 입력한

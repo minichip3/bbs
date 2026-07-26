@@ -2,7 +2,18 @@ import sys
 import traceback
 from core.login import login_menu
 from core.init import initialize
-from bbsio.rawio import set_encoding, rawprint, rawinput, SessionIdleTimeout, ConnectionClosed
+from bbsio.rawio import (
+    set_encoding, set_channel, rawprint, rawinput, SessionIdleTimeout, ConnectionClosed,
+)
+
+def parse_channel():
+    """dialup.py/telnet.py가 --channel=modem 또는 --channel=telnet 인자로
+    어느 경로로 들어온 접속인지 알려준다. 직접 실행하는 등 인자가 없으면
+    'unknown'으로 둔다."""
+    for arg in sys.argv[1:]:
+        if arg.startswith('--channel='):
+            return arg.split('=', 1)[1]
+    return 'unknown'
 
 def select_locale():
     rawprint("사용할 문자 인코딩을 선택하세요:\n", 'euc-kr')
@@ -20,6 +31,7 @@ def select_locale():
 
 def main():
     initialize()
+    set_channel(parse_channel())
     encoding = select_locale()
     set_encoding(encoding)
     login_menu()

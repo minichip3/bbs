@@ -11,7 +11,7 @@ from logutil import log, log_io
 # 설정
 LISTEN_HOST = '0.0.0.0'
 LISTEN_PORT = 2323          # 23은 굳이 안 씀 - 이 컨테이너 안에서 우리 말고 아무도 안 쓰지만 혼동 방지
-BBS_COMMAND = ['python3', '-u', 'bbs.py']
+BBS_COMMAND = ['python3', '-u', 'bbs.py', '--channel=telnet']
 MAX_CONNECTIONS = 20        # 동시 접속 상한 (스레드/프로세스 무한 생성 방지)
 
 # 접속 빈도 제한 - 봇/스캐너가 짧은 시간에 계속 재접속하는 걸 막는다.

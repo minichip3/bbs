@@ -12,7 +12,7 @@ from logutil import log, log_io, log_verbose
 # 설정
 MODEM_PORT = '/dev/ttyS0'           # 실제 모뎀 장치 (USR5686G, HT802 경유 VoIP 회선)
 # -u: bbs.py 쪽 stdout도 완전 비버퍼링으로 강제 (PTY라 보통 라인버퍼이긴 하지만 명시)
-BBS_COMMAND = ['python3', '-u', 'bbs.py']  # BBS 실행 명령어
+BBS_COMMAND = ['python3', '-u', 'bbs.py', '--channel=modem']  # BBS 실행 명령어
 BAUDRATE = 115200                   # 시리얼 통신 속도 (AT&B1로 DTE측 고정 속도와 일치)
 CONNECT_TIMEOUT = 40                 # CONNECT 메시지 대기 시간 (초)
 
