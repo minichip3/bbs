@@ -1,0 +1,19 @@
+services:
+  bbs:
+    build: .
+    container_name: hitel-bbs
+    restart: unless-stopped
+    devices:
+      - "/dev/ttyS0:/dev/ttyS0"
+    ports:
+      - "2323:2323"
+    environment:
+      - TZ=Asia/Seoul
+      # 1로 바꾸면 바이트 단위 입출력 로그까지 다 보임 (기본은 접속/연결 이벤트만)
+      - BBS_VERBOSE=1
+    volumes:
+      # users.json/posts.json/messages.json/stats.json 같은 실제 데이터가
+      # 이미지 재빌드할 때마다 날아가지 않도록 호스트에 영구 저장한다.
+      - ./data:/app/data
+    stdin_open: true
+    tty: true

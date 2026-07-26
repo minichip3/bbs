@@ -2,3 +2,5 @@
 .DS_Store
 /data/*.json
 __pycache__
+*.bak
+*.bak.*
