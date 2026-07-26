@@ -4,7 +4,8 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir pyserial wcwidth
 
-COPY dialup.py bbs_main.py telnet_server.py logutil.py start.sh ./
+COPY bbs_main.py start.sh ./
+COPY server/ ./server/
 COPY bbsio/ ./bbsio/
 COPY core/ ./core/
 COPY data/ ./data/

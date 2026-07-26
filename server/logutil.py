@@ -19,7 +19,7 @@ def log_verbose(msg):
 
 
 def log_io(tag, direction, data, gap_ms=None):
-    # 모뎀(dialup.py)/텔넷(telnet_server.py) 공용 입출력 로그 포맷.
+    # 모뎀(dialup.py)/텔넷(telnet.py) 공용 입출력 로그 포맷.
     # tag: 모뎀이면 장치 경로(/dev/ttyS0), 텔넷이면 클라이언트 IP.
     # direction: '수신' 또는 '송신'.
     if not VERBOSE:

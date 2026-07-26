@@ -2,9 +2,9 @@
 # 모뎀 데몬 + 텔넷 서버를 같이 띄우고, 둘 다 감시한다.
 # 둘 중 하나라도 죽으면 컨테이너 전체를 재시작하도록 exit해서
 # Docker의 restart policy(unless-stopped)가 다시 올려주게 한다.
-python3 -u dialup.py &
+python3 -u server/dialup.py &
 DIALUP_PID=$!
-python3 -u telnet_server.py &
+python3 -u server/telnet.py &
 TELNET_PID=$!
 
 wait -n $DIALUP_PID $TELNET_PID
