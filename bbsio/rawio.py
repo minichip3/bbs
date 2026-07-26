@@ -21,6 +21,13 @@ ECHO_PACING_DELAY = 0.02
 # 함수에 들어가자마자 잠깐 쉬어 화면이 완전히 그려질 시간을 확보한다.
 SCREEN_SETTLE_DELAY = 0.3
 
+# 일부 클라이언트(예: Win98 VM + 이야기 조합)에서 백스페이스 키 하나를
+# 눌러도 0x08 바이트가 짧은 간격(수~수십ms)으로 두 번 들어오는 현상이
+# 실사용에서 확인됨 - 그 결과 한 번 눌렀는데 두 글자가 지워짐. 원인은
+# 클라이언트/가상머신 키보드 쪽으로 보이나 서버에서 방어적으로 짧은
+# 시간 안의 중복 백스페이스는 한 번으로 처리(디바운스)한다.
+BACKSPACE_DEBOUNCE_SECONDS = 0.08
+
 # 모뎀→PTY 중계가 죽거나 회선이 소리소문없이 끊겨도 getchar()가 여기서
 # 영원히 블로킹해선 안 된다 (이게 "랜덤 프리징"의 핵심 원인이었음).
 # 이 시간 동안 입력이 전혀 없으면 SessionIdleTimeout을 던진다.
@@ -136,12 +143,18 @@ def rawinput(prompt='', encoding=None) -> str:
     flush_input()
     rawprint(prompt, encoding)
     buffer = []
+    last_backspace_time = 0.0
     while True:
         ch = getchar()
         if ch in ('\n', '\r'):
             rawprint('\n', encoding)
             return ''.join(buffer)
         elif ord(ch) in (8, 127):  # Backspace: ^H or DEL
+            now = time.time()
+            if now - last_backspace_time < BACKSPACE_DEBOUNCE_SECONDS:
+                last_backspace_time = now
+                continue
+            last_backspace_time = now
             if buffer:
                 last = buffer.pop()
                 width = wcwidth(last)
@@ -179,12 +192,18 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
     flush_input()
     rawprint(prompt, encoding)
     buffer = []
+    last_backspace_time = 0.0
     while True:
         ch = getchar()
         if ch in ('\n', '\r'):
             rawprint('\n', encoding)
             return ''.join(buffer)
         elif ord(ch) in (8, 127):  # Backspace: ^H or DEL
+            now = time.time()
+            if now - last_backspace_time < BACKSPACE_DEBOUNCE_SECONDS:
+                last_backspace_time = now
+                continue
+            last_backspace_time = now
             if buffer:
                 last = buffer.pop()
                 width = wcwidth(last)
@@ -230,6 +249,7 @@ def command_input(prompt=' > ', encoding=None) -> str:
         flush_input()
         rawprint(prompt, encoding)
         buffer = []
+        last_backspace_time = 0.0
         while True:
             ch = getchar()
             if ch in ('\n', '\r'):
@@ -241,6 +261,11 @@ def command_input(prompt=' > ', encoding=None) -> str:
                         continue  # 다시 입력 받기
                 return command
             elif ord(ch) in (8, 127):  # Backspace
+                now = time.time()
+                if now - last_backspace_time < BACKSPACE_DEBOUNCE_SECONDS:
+                    last_backspace_time = now
+                    continue
+                last_backspace_time = now
                 if buffer:
                     last = buffer.pop()
                     width = wcwidth(last)
@@ -279,6 +304,7 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
     rawprint(prompt + '\n', encoding)
     lines = [""]
     current_line = 0
+    last_backspace_time = 0.0
 
     while True:
         ch = getchar()
@@ -289,6 +315,11 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
             current_line += 1
             rawprint('\n', encoding)
         elif ord(ch) in (8, 127):  # Backspace
+            now = time.time()
+            if now - last_backspace_time < BACKSPACE_DEBOUNCE_SECONDS:
+                last_backspace_time = now
+                continue
+            last_backspace_time = now
             if lines[current_line]:
                 last = lines[current_line][-1]
                 width = wcwidth(last)
