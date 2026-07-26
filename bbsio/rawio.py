@@ -15,6 +15,12 @@ current_encoding = 'utf-8'
 # (옛날 BBS/도어 프로그램들이 한글 깨짐 방지로 흔히 쓰던 pacing delay).
 ECHO_PACING_DELAY = 0.02
 
+# 직전에 박스/배너 등 화면을 잔뜩 그린 뒤 곧바로 입력을 받기 시작하면,
+# 느린 터미널 프로그램(minicom 등)이 그 화면을 다 그리기도 전에 사용자가
+# 타이핑을 시작해서 초반 키 입력 에코가 씹히는 현상이 있었다. 프롬프트
+# 함수에 들어가자마자 잠깐 쉬어 화면이 완전히 그려질 시간을 확보한다.
+SCREEN_SETTLE_DELAY = 0.3
+
 # 모뎀→PTY 중계가 죽거나 회선이 소리소문없이 끊겨도 getchar()가 여기서
 # 영원히 블로킹해선 안 된다 (이게 "랜덤 프리징"의 핵심 원인이었음).
 # 이 시간 동안 입력이 전혀 없으면 SessionIdleTimeout을 던진다.
@@ -137,6 +143,7 @@ def getchar():
 def rawinput(prompt='', encoding=None) -> str:
     if encoding is None:
         encoding = current_encoding
+    time.sleep(SCREEN_SETTLE_DELAY)
     flush_input()
     rawprint(prompt, encoding)
     buffer = []
@@ -175,6 +182,7 @@ def rawinput(prompt='', encoding=None) -> str:
 def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
     if encoding is None:
         encoding = current_encoding
+    time.sleep(SCREEN_SETTLE_DELAY)
     flush_input()
     rawprint(prompt, encoding)
     buffer = []
@@ -221,6 +229,7 @@ def command_input(prompt=' > ', encoding=None) -> str:
     from core.command import is_global_command, handle_global_command
 
     while True:
+        time.sleep(SCREEN_SETTLE_DELAY)
         flush_input()
         rawprint(prompt, encoding)
         buffer = []
@@ -264,6 +273,7 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
     if encoding is None:
         encoding = current_encoding
 
+    time.sleep(SCREEN_SETTLE_DELAY)
     flush_input()
     rawprint(prompt + '\n', encoding)
     lines = [""]
