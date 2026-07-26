@@ -8,6 +8,13 @@ from wcwidth import wcwidth, wcswidth
 
 current_encoding = 'utf-8'
 
+# 일부 클라이언트(이야기 등)가 ESC[0m(RESET)을 완전히 처리하지 못해서,
+# 굵게/색 있는 프롬프트 문구 뒤에 사용자가 타이핑한 글자가 그 스타일을
+# 그대로 물려받아 보이는 현상이 있었다 (예: 노란 프롬프트 뒤에 입력한
+# 글자도 노랗게 보임). 매 글자를 에코하기 직전에 다시 한 번 RESET을
+# 명시적으로 찍어서 확실히 기본 스타일로 되돌린다.
+_RESET = '\x1b[0m'
+
 # 실제 통신 속도(14400bps 등)보다 서버 쪽 os.write()가 훨씬 빠르게 여러
 # 글자를 밀어넣을 수 있어서, 클라이언트(minicom 등)가 "몰아서" 도착한
 # 여러 글자를 한꺼번에 렌더링하지 못하고 일부를 놓치는 현상이 있었다.
@@ -181,7 +188,7 @@ def rawinput(prompt='', encoding=None) -> str:
             width = wcwidth(ch)
             if width > 0:
                 buffer.append(ch)
-                rawprint(ch, encoding)
+                rawprint(_RESET + ch, encoding)
                 time.sleep(ECHO_PACING_DELAY)
             # else: ignore zero-width characters
 
@@ -230,7 +237,7 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
             width = wcwidth(ch)
             if width > 0:
                 buffer.append(ch)
-                rawprint('*', encoding)
+                rawprint(_RESET + '*', encoding)
                 time.sleep(ECHO_PACING_DELAY)
 
 def command_input(prompt=' > ', encoding=None) -> str:
@@ -292,7 +299,7 @@ def command_input(prompt=' > ', encoding=None) -> str:
                 width = wcwidth(ch)
                 if width > 0:
                     buffer.append(ch)
-                    rawprint(ch, encoding)
+                    rawprint(_RESET + ch, encoding)
                     time.sleep(ECHO_PACING_DELAY)
 
 def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', encoding=None):
@@ -350,5 +357,5 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
             width = wcwidth(ch)
             if width > 0:
                 lines[current_line] += ch
-                rawprint(ch, encoding)
+                rawprint(_RESET + ch, encoding)
                 time.sleep(ECHO_PACING_DELAY)
