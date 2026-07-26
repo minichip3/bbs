@@ -19,7 +19,8 @@ from core.profile import (
 
 QUOTES_FILE = os.path.join('data', 'quotes.txt')
 
-MAX_LOGIN_TRY = 3
+MAX_LOGIN_TRY = 3   # 같은 아이디로 비밀번호를 몇 번까지 재시도할지
+MAX_TOTAL_TRY = 6   # 아이디를 바꿔가며 재시도해도, 세션 전체 누적 실패는 이 안으로 제한
 
 SITE_NAME = "M I N I - T E L"
 
@@ -90,9 +91,18 @@ def _draw_minimal_header():
     return width
 
 
-def login_prompt(users):
+def login_prompt(users, session_state):
     """ID/비밀번호를 받아 로그인 처리. 성공 시 username, 취소 시 None,
-    종료 요청 시 'QUIT' 문자열을 반환한다."""
+    종료 요청 시 'QUIT' 문자열을 반환한다.
+
+    아이디가 존재하지 않아도 비밀번호 입력까지 그대로 진행시키고 동일한
+    "비밀번호가 일치하지 않습니다" 메시지만 보여준다 - 아이디 존재 여부를
+    구분해서 알려주면 계정 존재 여부를 캐낼 수 있는 취약점(user
+    enumeration)이 되기 때문에 일부러 구분하지 않는다. 대신 아이디를
+    오타냈을 가능성을 고려해, 비밀번호를 3번 틀리면 접속을 끊는 대신
+    아이디 입력 화면으로 돌려보낸다. 다만 무제한 재시도로 브루트포스에
+    노출되지 않도록 세션 전체 누적 실패 횟수(session_state)에 별도
+    상한을 둔다."""
     user_id = rawinput(C_TITLE + f" {_label('이용자 ID')} : " + RESET).strip()
 
     if user_id.upper() == 'QUIT':
@@ -138,12 +148,17 @@ def login_prompt(users):
             return user_id
 
         tries += 1
+        session_state['total_fails'] += 1
+        if session_state['total_fails'] >= MAX_TOTAL_TRY:
+            rawprint(C_ERR + "\n로그인 시도 횟수를 초과하였습니다. 접속을 종료합니다.\n" + RESET)
+            sys.exit(0)
+
         remain = MAX_LOGIN_TRY - tries
         if remain > 0:
             last_error = f"\n 비밀번호가 일치하지 않습니다. (남은 시도: {remain}회)\n\n"
         else:
-            rawprint(C_ERR + "\n 비밀번호를 3회 잘못 입력하였습니다. 접속을 종료합니다.\n" + RESET)
-            sys.exit(0)
+            rawprint(C_ERR + "\n 비밀번호를 3회 잘못 입력하였습니다. 아이디를 다시 확인해 주세요.\n" + RESET)
+            rawinput("계속하려면 Enter를 누르세요.\n")
 
     return None
 
@@ -230,10 +245,12 @@ def login_menu():
     # 로그인 재시도마다가 아니라 실제 접속(전화 연결) 당 한 번만 집계한다.
     visit_stats = stats_mod.record_visit()
     quote = pick_quote()
+    # 아이디를 바꿔가며 다시 시도해도 실패 횟수는 이 세션 안에서 계속 누적된다.
+    session_state = {'total_fails': 0}
     while True:
         draw_splash(visit_stats, quote)
         draw_login_box()
-        result = login_prompt(users)
+        result = login_prompt(users, session_state)
         if result == 'QUIT':
             rawprint(C_OK + "\n다음에 또 만나요!\n" + RESET)
             break
