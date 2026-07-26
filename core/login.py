@@ -1,11 +1,9 @@
 import os
 import sys
-import json
 import random
 import hashlib
 from datetime import datetime
 
-import bbsio.tui as tui
 from bbsio.tui import (
     rawprint, C_BORDER, C_TITLE, C_TEXT, C_DIM, C_OK, C_ERR, C_HILITE, RESET,
     clear_screen, hline, pad, draw_top_bar, box_top, box_bottom, box_line, box_sep,
@@ -101,11 +99,6 @@ def login_prompt(users):
 
         if user_id in users and users[user_id]['password'] == hashed:
             user_info = users[user_id]
-            width_cfg = user_info.get('width', 0)
-            height_cfg = user_info.get('height', 0)
-            if width_cfg > 0 and height_cfg > 0:
-                tui.SCREEN_WIDTH = width_cfg
-                tui.SCREEN_HEIGHT = height_cfg
 
             last_login = user_info.get('last_login')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

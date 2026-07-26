@@ -3,7 +3,6 @@ import json
 import hashlib
 from datetime import datetime
 
-import bbsio.tui as tui
 from bbsio.rawio import rawinput, hidden_input, command_input
 from bbsio.tui import (
     rawprint, C_TITLE, C_TEXT, C_DIM, C_OK, C_ERR, RESET,
@@ -41,21 +40,10 @@ def is_admin(username):
 
 
 def collect_profile():
-    try:
-        width = int(rawinput("화면 칸 수 (자동: 0): "))
-    except ValueError:
-        width = 0
-    try:
-        height = int(rawinput("화면 줄 수 (자동: 0): "))
-    except ValueError:
-        height = 0
-
     return {
         'name': rawinput("이름: "),
         'sex': rawinput("성별 (M/F): ").upper(),
         'birthday': rawinput("생년월일 (YYYYMMDD): "),
-        'width': width,
-        'height': height,
     }
 
 
@@ -72,8 +60,6 @@ def show_user_info(username, users, admin_mode=False):
     box_line(f" 3 이        름 : {user.get('name', '')}", width)
     box_line(f" 4 성        별 : {user.get('sex', '')}", width)
     box_line(f" 5 생 년  월 일 : {user.get('birthday', '')}", width)
-    box_line(f" 6 화면   칸 수 : {user.get('width', 0)}", width)
-    box_line(f" 7 화면   줄 수 : {user.get('height', 0)}", width)
     if admin_mode and user.get('is_admin'):
         box_sep(width)
         box_line("== 이 계정은 관리자 권한을 가지고 있습니다 ==", width)
@@ -102,12 +88,6 @@ def edit_profile(username):
                 new_profile = collect_profile()
                 users[username].update(new_profile)
                 save_users(users)
-                width_cfg = new_profile.get('width', 0)
-                height_cfg = new_profile.get('height', 0)
-                if width_cfg > 0 and height_cfg > 0:
-                    tui.SCREEN_WIDTH = width_cfg
-                    tui.SCREEN_HEIGHT = height_cfg
-                    width, _ = get_screen_size()
                 rawprint(C_OK + "정보가 수정되었습니다.\n" + RESET)
                 rawinput("계속하려면 Enter를 누르세요.\n")
             elif cmd == 'w':
