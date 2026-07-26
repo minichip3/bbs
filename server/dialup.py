@@ -11,8 +11,8 @@ from logutil import log, log_io, log_verbose
 
 # 설정
 MODEM_PORT = '/dev/ttyS0'           # 실제 모뎀 장치 (USR5686G, HT802 경유 VoIP 회선)
-# -u: bbs_main.py 쪽 stdout도 완전 비버퍼링으로 강제 (PTY라 보통 라인버퍼이긴 하지만 명시)
-BBS_COMMAND = ['python3', '-u', 'bbs_main.py']  # BBS 실행 명령어
+# -u: bbs.py 쪽 stdout도 완전 비버퍼링으로 강제 (PTY라 보통 라인버퍼이긴 하지만 명시)
+BBS_COMMAND = ['python3', '-u', 'bbs.py']  # BBS 실행 명령어
 BAUDRATE = 115200                   # 시리얼 통신 속도 (AT&B1로 DTE측 고정 속도와 일치)
 CONNECT_TIMEOUT = 40                 # CONNECT 메시지 대기 시간 (초)
 
@@ -150,7 +150,7 @@ def modem_handler():
                 # EUC-KR 바이트 자체는 손상 없이 그대로 전달됨(줄바꿈만
                 # \n -> \r\n으로 바뀌는 정상적인 동작) - 그래도 원격 회선
                 # 특유의 타이밍/개행 처리에 어떤 오작동 여지도 남기지 않도록
-                # slave를 완전 raw/8비트-투명 모드로 고정해 둔다. bbs_main.py
+                # slave를 완전 raw/8비트-투명 모드로 고정해 둔다. bbs.py
                 # 쪽 getchar()가 첫 입력 시점에 자기 stdin(=이 slave)을 raw로
                 # 바꾸긴 하지만, 그 전에 출력되는 환영 화면/인코딩 선택 화면
                 # 구간은 이 설정이 없으면 계속 cooked 모드로 나간다.
@@ -158,7 +158,7 @@ def modem_handler():
                 log(f'[{MODEM_PORT}] PTY 생성 완료 (raw 모드 설정)')
 
                 # stderr는 절대로 slave_fd(모뎀으로 나가는 통로)에 물리면 안 됨.
-                # 예전에는 stderr=slave_fd였는데, bbs_main.py에서 처리 안 된
+                # 예전에는 stderr=slave_fd였는데, bbs.py에서 처리 안 된
                 # 예외가 나면 트레이스백이 고스란히 모뎀 쪽으로 나가면서(사용자
                 # 화면엔 의미 없는 텍스트/무응답) docker logs에는 아무 흔적도
                 # 안 남았음 - "이유 없이 멈췄다"처럼 보인 원인 중 하나.
@@ -205,14 +205,14 @@ def modem_handler():
             log('모뎀 연결 종료')
 
 def log_bbs_stderr(proc):
-    # bbs_main.py의 stderr(트레이스백 등)를 컨테이너 로그로 흘려보냄.
+    # bbs.py의 stderr(트레이스백 등)를 컨테이너 로그로 흘려보냄.
     try:
         for line in iter(proc.stderr.readline, b''):
             if not line:
                 break
-            log('[bbs_main stderr] ' + line.decode('utf-8', errors='ignore').rstrip())
+            log('[bbs stderr] ' + line.decode('utf-8', errors='ignore').rstrip())
     except Exception as e:
-        log(f'[bbs_main stderr 읽기 오류] {e}')
+        log(f'[bbs stderr 읽기 오류] {e}')
     finally:
         try:
             proc.stderr.close()

@@ -11,7 +11,7 @@ from logutil import log, log_io
 # 설정
 LISTEN_HOST = '0.0.0.0'
 LISTEN_PORT = 2323          # 23은 굳이 안 씀 - 이 컨테이너 안에서 우리 말고 아무도 안 쓰지만 혼동 방지
-BBS_COMMAND = ['python3', '-u', 'bbs_main.py']
+BBS_COMMAND = ['python3', '-u', 'bbs.py']
 MAX_CONNECTIONS = 20        # 동시 접속 상한 (스레드/프로세스 무한 생성 방지)
 
 # 접속 빈도 제한 - 봇/스캐너가 짧은 시간에 계속 재접속하는 걸 막는다.
@@ -63,7 +63,7 @@ def is_rate_limited(ip):
 
 def strip_telnet_iac(data):
     # 소켓으로 들어오는 바이트 중 telnet IAC 명령 시퀀스(IAC+WILL/WONT/DO/DONT+옵션,
-    # 총 3바이트)를 걸러내서 bbs_main.py한테 진짜 입력인 것처럼 넘어가지 않게 한다.
+    # 총 3바이트)를 걸러내서 bbs.py한테 진짜 입력인 것처럼 넘어가지 않게 한다.
     # IAC IAC(0xFF 0xFF)는 데이터 안의 리터럴 0xFF 한 바이트를 뜻하는 이스케이프라
     # 별도로 처리한다. 완전한 telnet 상태머신은 아니지만 이 용도엔 충분함.
     out = bytearray()
@@ -90,9 +90,9 @@ def log_bbs_stderr(proc, tag):
         for line in iter(proc.stderr.readline, b''):
             if not line:
                 break
-            log(f'[bbs_main stderr {tag}] ' + line.decode('utf-8', errors='ignore').rstrip())
+            log(f'[bbs stderr {tag}] ' + line.decode('utf-8', errors='ignore').rstrip())
     except Exception as e:
-        log(f'[bbs_main stderr 읽기 오류 {tag}] {e}')
+        log(f'[bbs stderr 읽기 오류 {tag}] {e}')
     finally:
         try:
             proc.stderr.close()
@@ -201,7 +201,7 @@ def handle_connection(conn, addr):
         conn.sendall(NEGOTIATION)
 
         # PTY 생성. dialup.py와 동일하게 raw 모드는 여기서 딱 한 번만 건다 -
-        # bbs_main.py의 getchar() 안에서 매 글자마다 반복해서 걸면 TCSAFLUSH가
+        # bbs.py의 getchar() 안에서 매 글자마다 반복해서 걸면 TCSAFLUSH가
         # 아직 안 읽은 입력을 버려버리는 버그가 있었던 걸 이미 확인함(rawio.py 참고).
         master_fd, slave_fd = pty.openpty()
         tty.setraw(slave_fd)
