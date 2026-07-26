@@ -20,7 +20,10 @@ def initialize():
         with open("data/boards.json", "w", encoding="utf-8") as f:
             json.dump([
                 {"id": "notice", "name": "공지사항", "type": "restricted"},
-                {"id": "bbs", "name": "자유게시판", "type": "normal"}
+                {"id": "hello", "name": "안녕하세요.가입인사", "type": "normal"},
+                {"id": "bbs", "name": "자유게시판", "type": "normal"},
+                {"id": "plaza", "name": "한마당", "type": "normal"},
+                {"id": "market", "name": "장터게시판", "type": "normal"}
             ], f, ensure_ascii=False, indent=2)
 
     os.makedirs("data/posts", exist_ok=True)
