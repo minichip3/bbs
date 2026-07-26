@@ -160,7 +160,7 @@ def rawinput(prompt='', encoding=None) -> str:
             width = wcwidth(ch)
             if width > 0:
                 buffer.append(ch)
-                _redraw_line(prompt, ''.join(buffer), encoding)
+                rawprint(ch, encoding)
             # else: ignore zero-width characters
 
 def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
@@ -197,7 +197,7 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
             width = wcwidth(ch)
             if width > 0:
                 buffer.append(ch)
-                _redraw_line(prompt, ''.join(buffer), encoding, mask=True)
+                rawprint('*', encoding)
 
 def command_input(prompt=' > ', encoding=None) -> str:
     """
@@ -247,7 +247,7 @@ def command_input(prompt=' > ', encoding=None) -> str:
                 width = wcwidth(ch)
                 if width > 0:
                     buffer.append(ch)
-                    _redraw_line(prompt, ''.join(buffer), encoding)
+                    rawprint(ch, encoding)
 
 def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', encoding=None):
     if encoding is None:
@@ -292,4 +292,4 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
             width = wcwidth(ch)
             if width > 0:
                 lines[current_line] += ch
-                _redraw_line('', lines[current_line], encoding)
+                rawprint(ch, encoding)
