@@ -1,11 +1,19 @@
 import sys
 import os
 import select
+import time
 import tty
 import termios
 from wcwidth import wcwidth, wcswidth
 
 current_encoding = 'utf-8'
+
+# 실제 통신 속도(14400bps 등)보다 서버 쪽 os.write()가 훨씬 빠르게 여러
+# 글자를 밀어넣을 수 있어서, 클라이언트(minicom 등)가 "몰아서" 도착한
+# 여러 글자를 한꺼번에 렌더링하지 못하고 일부를 놓치는 현상이 있었다.
+# 글자 에코 하나마다 아주 짧게 쉬어 클라이언트가 그릴 시간을 확보한다
+# (옛날 BBS/도어 프로그램들이 한글 깨짐 방지로 흔히 쓰던 pacing delay).
+ECHO_PACING_DELAY = 0.02
 
 # 모뎀→PTY 중계가 죽거나 회선이 소리소문없이 끊겨도 getchar()가 여기서
 # 영원히 블로킹해선 안 된다 (이게 "랜덤 프리징"의 핵심 원인이었음).
@@ -161,6 +169,7 @@ def rawinput(prompt='', encoding=None) -> str:
             if width > 0:
                 buffer.append(ch)
                 rawprint(ch, encoding)
+                time.sleep(ECHO_PACING_DELAY)
             # else: ignore zero-width characters
 
 def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
@@ -198,6 +207,7 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
             if width > 0:
                 buffer.append(ch)
                 rawprint('*', encoding)
+                time.sleep(ECHO_PACING_DELAY)
 
 def command_input(prompt=' > ', encoding=None) -> str:
     """
@@ -248,6 +258,7 @@ def command_input(prompt=' > ', encoding=None) -> str:
                 if width > 0:
                     buffer.append(ch)
                     rawprint(ch, encoding)
+                    time.sleep(ECHO_PACING_DELAY)
 
 def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', encoding=None):
     if encoding is None:
@@ -293,3 +304,4 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
             if width > 0:
                 lines[current_line] += ch
                 rawprint(ch, encoding)
+                time.sleep(ECHO_PACING_DELAY)
