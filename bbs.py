@@ -5,12 +5,12 @@ from core.init import initialize
 from bbsio.rawio import set_encoding, rawprint, rawinput, SessionIdleTimeout, ConnectionClosed
 
 def select_locale():
-    rawprint("사용할 문자 인코딩을 선택하세요:\n", 'utf-8')
+    rawprint("사용할 문자 인코딩을 선택하세요:\n", 'euc-kr')
     rawprint("1. 이 글자가 보이면 완성형 입니다.\n", 'euc-kr')
     rawprint("2. 이 글자가 보이면 조합형 입니다.\n", 'johab')
     rawprint("3. 이 글자가 보이면 UTF-8 입니다.\n", 'utf-8')
-    rawprint("\n", 'utf-8')
-    choice = rawinput("선택 (1~3, 기본값 1): ", 'utf-8').strip()
+    rawprint("\n", 'euc-kr')
+    choice = rawinput("선택 (1~3, 기본값 1): ", 'euc-kr').strip()
     if choice == '2':
         return 'johab'
     elif choice == '3':
