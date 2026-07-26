@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import random
 import hashlib
 from datetime import datetime
 
@@ -12,6 +13,10 @@ from bbsio.tui import (
 )
 from bbsio.rawio import rawinput, hidden_input
 from core.board import main_menu
+from core import stats as stats_mod
+from core import mail
+
+QUOTES_FILE = os.path.join('data', 'quotes.txt')
 
 USER_FILE = os.path.join('data', 'users.json')
 MAX_LOGIN_TRY = 3
@@ -31,7 +36,15 @@ def save_users(users):
         json.dump(users, f, ensure_ascii=False, indent=2)
 
 
-def draw_splash():
+def pick_quote():
+    if not os.path.exists(QUOTES_FILE):
+        return ''
+    with open(QUOTES_FILE, encoding='utf-8') as f:
+        lines = [line.strip() for line in f if line.strip()]
+    return random.choice(lines) if lines else ''
+
+
+def draw_splash(visit_stats=None, quote=''):
     """접속 로고 - 하이텔 접속 시 뜨던 부팅 배너를 흉내낸다."""
     clear_screen()
     width, _ = get_screen_size()
@@ -46,6 +59,15 @@ def draw_splash():
         rawprint(C_HILITE + "M I N I - T E L  B B S" + RESET + '\n')
     rawprint('\n')
     rawprint(C_DIM + pad("사설 전자게시판(BBS) 서비스 - 01410 접속을 환영합니다.", width, 'center') + RESET + '\n')
+    rawprint('\n')
+
+    if visit_stats is not None:
+        member_count = len(load_users())
+        info = (f"총 회원 {member_count}명  |  오늘 접속 {visit_stats.get('today_visits', 0)}명"
+                f"  |  누적 접속 {visit_stats.get('total_visits', 0)}회")
+        rawprint(C_DIM + pad(info, width, 'center') + RESET + '\n')
+    if quote:
+        rawprint(C_TITLE + pad(f"※ {quote}", width, 'center') + RESET + '\n')
     rawprint('\n')
 
 
@@ -98,6 +120,9 @@ def login_prompt(users):
                 box_line(f"직전 접속 : {last_login}", width)
             else:
                 box_line("첫 방문을 환영합니다!", width)
+            unread = mail.unread_count(user_id)
+            if unread > 0:
+                box_line(f"※ 읽지 않은 쪽지가 {unread}통 있습니다!", width)
             box_bottom(width)
             rawinput(C_DIM + "\n계속하려면 Enter를 누르세요." + RESET)
             return user_id
@@ -212,8 +237,11 @@ def collect_profile():
 
 def login_menu():
     users = load_users()
+    # 로그인 재시도마다가 아니라 실제 접속(전화 연결) 당 한 번만 집계한다.
+    visit_stats = stats_mod.record_visit()
+    quote = pick_quote()
     while True:
-        draw_splash()
+        draw_splash(visit_stats, quote)
         draw_login_box()
         result = login_prompt(users)
         if result == 'QUIT':
