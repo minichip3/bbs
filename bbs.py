@@ -2,26 +2,36 @@ import sys
 import traceback
 from core.login import login_menu
 from core.init import initialize
-from bbsio.rawio import set_encoding, rawprint, rawinput, SessionIdleTimeout, ConnectionClosed
+from bbsio.rawio import (
+    set_encoding, set_channel, rawprint, rawinput, SessionIdleTimeout, ConnectionClosed,
+)
+
+def parse_channel():
+    """dialup.py/telnet.py가 --channel=modem 또는 --channel=telnet 인자로
+    어느 경로로 들어온 접속인지 알려준다. 직접 실행하는 등 인자가 없으면
+    'unknown'으로 둔다."""
+    for arg in sys.argv[1:]:
+        if arg.startswith('--channel='):
+            return arg.split('=', 1)[1]
+    return 'unknown'
 
 def select_locale():
-    rawprint("사용할 문자 인코딩을 선택하세요:\n", 'utf-8')
-    rawprint("1. 이 글자가 보이면 UTF-8 입니다.\n", 'utf-8')
-    rawprint("2. 이 글자가 보이면 완성형 입니다.\n", 'euc-kr')
-    rawprint("3. 이 글자가 보이면 조합형 입니다.\n", 'johab')
-    rawprint("\n", 'utf-8')
-    choice = rawinput("선택 (1~3): ", 'utf-8').strip()
-    if choice == '1':
-        return 'utf-8'
-    elif choice == '2':
-        return 'euc-kr'
-    elif choice == '3':
+    rawprint("사용할 문자 인코딩을 선택하세요:\n", 'euc-kr')
+    rawprint("1. 이 글자가 보이면 완성형 입니다.\n", 'euc-kr')
+    rawprint("2. 이 글자가 보이면 조합형 입니다.\n", 'johab')
+    rawprint("3. 이 글자가 보이면 UTF-8 입니다.\n", 'utf-8')
+    rawprint("\n", 'euc-kr')
+    choice = rawinput("선택 (1~3, 기본값 1): ", 'euc-kr').strip()
+    if choice == '2':
         return 'johab'
-    else:
+    elif choice == '3':
         return 'utf-8'
+    else:
+        return 'euc-kr'
 
 def main():
     initialize()
+    set_channel(parse_channel())
     encoding = select_locale()
     set_encoding(encoding)
     login_menu()

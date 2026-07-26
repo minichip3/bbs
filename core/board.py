@@ -9,6 +9,8 @@ from bbsio.tui import (
 )
 from wcwidth import wcswidth
 from core import mail
+from core import admin
+from core.profile import is_admin, edit_profile
 
 POST_FILE = os.path.join('data', 'posts.json')
 SITE_NAME = "M I N I - T E L"
@@ -53,17 +55,22 @@ def save_posts(posts):
         json.dump(posts, f, ensure_ascii=False, indent=2)
 
 
-def view_post(post):
-    width, height = get_screen_size()
-    lines = post['content'].splitlines() or ['']
-    lines_per_page = max(1, height - 9)
-    page = 0
+def _can_edit(username, post):
+    return username == post['author'] or is_admin(username)
 
+
+def view_post(post, username):
+    width, height = get_screen_size()
+    page = 0
     while True:
         try:
+            lines = post['content'].splitlines() or ['']
+            lines_per_page = max(1, height - 9)
+            total_pages = max(1, (len(lines) + lines_per_page - 1) // lines_per_page)
+            page = min(page, total_pages - 1)
+
             clear_screen()
             draw_top_bar(SITE_NAME, now_str(), width)
-            total_pages = max(1, (len(lines) + lines_per_page - 1) // lines_per_page)
             box_top(width, f"글 읽기 ({page + 1}/{total_pages})")
             box_line(f"제목 : {post['title']}", width)
             box_line(f"글쓴이: {post['author']}   작성일: {post['date']}", width)
@@ -79,11 +86,40 @@ def view_post(post):
             cmd = command_input(C_TITLE + " > " + RESET).strip().lower()
 
             if cmd == 'ed':
-                rawprint(C_ERR + "[편집 기능은 아직 구현되지 않았습니다.]\n" + RESET)
-                rawinput("계속하려면 Enter를 누르세요.")
+                if not _can_edit(username, post):
+                    rawprint(C_ERR + "본인 글만 수정할 수 있습니다.\n" + RESET)
+                    rawinput("계속하려면 Enter를 누르세요.\n")
+                    continue
+                new_title = rawinput(C_TITLE + f"새 제목 (현재: {post['title']}) : " + RESET).strip()
+                rawprint(C_DIM + "새 내용을 입력하세요. 한 줄에 '.' 만 입력하면 종료됩니다.\n" + RESET)
+                new_content = multiline_input('')
+                if new_title:
+                    post['title'] = new_title
+                if new_content.strip():
+                    post['content'] = new_content
+                all_posts = load_posts()
+                for i, p in enumerate(all_posts):
+                    if p.get('id') == post.get('id'):
+                        all_posts[i] = post
+                        break
+                save_posts(all_posts)
+                rawprint(C_OK + "수정되었습니다.\n" + RESET)
+                rawinput("계속하려면 Enter를 누르세요.\n")
             elif cmd == 'dd':
-                rawprint(C_ERR + "[삭제 기능은 아직 구현되지 않았습니다.]\n" + RESET)
-                rawinput("계속하려면 Enter를 누르세요.")
+                if not _can_edit(username, post):
+                    rawprint(C_ERR + "본인 글만 삭제할 수 있습니다.\n" + RESET)
+                    rawinput("계속하려면 Enter를 누르세요.\n")
+                    continue
+                confirm = rawinput(C_ERR + "정말 삭제하시겠습니까? (Y/N): " + RESET).strip().upper()
+                if confirm == 'Y':
+                    all_posts = [p for p in load_posts() if p.get('id') != post.get('id')]
+                    save_posts(all_posts)
+                    rawprint(C_OK + "삭제되었습니다.\n" + RESET)
+                    rawinput("계속하려면 Enter를 누르세요.\n")
+                    return
+                else:
+                    rawprint("삭제가 취소되었습니다.\n")
+                    rawinput("계속하려면 Enter를 누르세요.\n")
             elif cmd in ('', 'f') and end < len(lines):
                 page += 1
             elif cmd == 'b' and page > 0:
@@ -96,7 +132,7 @@ def view_post(post):
             break
 
 
-def write_post(username, posts, board_id):
+def write_post(username, board_id):
     width, _ = get_screen_size()
     clear_screen()
     draw_top_bar(SITE_NAME + " 글쓰기", now_str(), width)
@@ -104,15 +140,22 @@ def write_post(username, posts, board_id):
     title = rawinput(C_TITLE + "제목 : " + RESET)
     rawprint(C_DIM + "내용을 입력하세요. 한 줄에 '.' 만 입력하면 종료됩니다.\n" + RESET)
     content = multiline_input('')
+
+    # 게시판별로 걸러낸 목록이 아니라 항상 전체 글 목록을 불러와서 그
+    # 위에 이어붙여야 한다 - 필터링된 목록을 그대로 저장하면 다른
+    # 게시판의 글이 전부 사라지는 버그가 있었다.
+    all_posts = load_posts()
+    next_id = max((p.get('id', 0) for p in all_posts), default=0) + 1
     post = {
+        'id': next_id,
         'board': board_id,
         'author': username,
         'title': title,
         'content': content,
         'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
-    posts.append(post)
-    save_posts(posts)
+    all_posts.append(post)
+    save_posts(all_posts)
     rawprint(C_OK + "\n글이 등록되었습니다!\n" + RESET)
     rawinput("계속하려면 Enter를 누르세요.")
 
@@ -140,12 +183,23 @@ def main_menu(username):
         if unread > 0:
             mail_hint += C_ERR + f"({unread})" + RESET
         mail_hint += C_TITLE + "]" + RESET
-        draw_footer(f"번호 선택 (게시판 ID 직접 입력도 가능)  {mail_hint}  [X:종료]", width)
+        hint = f"번호 선택 (게시판 ID 직접 입력도 가능)  {mail_hint}  [I:내정보]"
+        user_is_admin = is_admin(username)
+        if user_is_admin:
+            hint += C_TITLE + "  [A:관리자]" + RESET
+        hint += "  [X:종료]"
+        draw_footer(hint, width)
 
         choice = command_input(C_TITLE + " > " + RESET).strip().lower()
 
         if choice in ('m', '쪽지', 'mail'):
             mail.mail_menu(username)
+            continue
+        if choice in ('i', '내정보', 'info'):
+            edit_profile(username)
+            continue
+        if user_is_admin and choice in ('a', '관리', 'admin'):
+            admin.admin_menu(username)
             continue
 
         board = None
@@ -217,11 +271,12 @@ def board_menu(username, board, posts):
             cmd = command_input(C_TITLE + " > " + RESET).strip().lower()
 
             if cmd == 'w':
-                if board_type == 'restricted' and username != 'sysop':
+                if board_type == 'restricted' and not is_admin(username):
                     rawprint(C_ERR + "이 게시판에서는 글쓰기가 제한되어 있습니다.\n" + RESET)
                     rawinput("계속하려면 Enter를 누르세요.\n")
                 else:
-                    write_post(username, posts, board['id'])
+                    write_post(username, board['id'])
+                    posts = [p for p in load_posts() if p.get('board') == board['id']]
             elif cmd in ('', 'f') and (page + 1) * posts_per_page < len(posts):
                 page += 1
                 continue
@@ -234,7 +289,8 @@ def board_menu(username, board, posts):
                 try:
                     sel = int(cmd)
                     if 1 <= sel <= len(posts):
-                        view_post(posts[sel - 1])
+                        view_post(posts[sel - 1], username)
+                        posts = [p for p in load_posts() if p.get('board') == board['id']]
                     else:
                         rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
                         rawinput("계속하려면 Enter를 누르세요.\n")

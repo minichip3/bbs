@@ -1,11 +1,9 @@
 import os
 import sys
-import json
 import random
 import hashlib
 from datetime import datetime
 
-import bbsio.tui as tui
 from bbsio.tui import (
     rawprint, C_BORDER, C_TITLE, C_TEXT, C_DIM, C_OK, C_ERR, C_HILITE, RESET,
     clear_screen, hline, pad, draw_top_bar, box_top, box_bottom, box_line, box_sep,
@@ -15,25 +13,16 @@ from bbsio.rawio import rawinput, hidden_input
 from core.board import main_menu
 from core import stats as stats_mod
 from core import mail
+from core.profile import (
+    load_users, save_users, collect_profile, show_user_info,
+)
 
 QUOTES_FILE = os.path.join('data', 'quotes.txt')
 
-USER_FILE = os.path.join('data', 'users.json')
-MAX_LOGIN_TRY = 3
+MAX_LOGIN_TRY = 3   # 같은 아이디로 비밀번호를 몇 번까지 재시도할지
+MAX_TOTAL_TRY = 6   # 아이디를 바꿔가며 재시도해도, 세션 전체 누적 실패는 이 안으로 제한
 
 SITE_NAME = "M I N I - T E L"
-
-
-def load_users():
-    if not os.path.exists(USER_FILE):
-        return {}
-    with open(USER_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def save_users(users):
-    with open(USER_FILE, 'w', encoding='utf-8') as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
 
 
 def pick_quote():
@@ -92,9 +81,28 @@ def _label(text):
     return pad(text, LABEL_WIDTH)
 
 
-def login_prompt(users):
+def _draw_minimal_header():
+    """접속 배너 전체를 다시 그리지 않고, 상단바만 새로 그려서 화면을
+    초기화한다 (아래 참고)."""
+    width, _ = get_screen_size()
+    clear_screen()
+    draw_top_bar(SITE_NAME, datetime.now().strftime('%y/%m/%d %H:%M'), width)
+    rawprint('\n')
+    return width
+
+
+def login_prompt(users, session_state):
     """ID/비밀번호를 받아 로그인 처리. 성공 시 username, 취소 시 None,
-    종료 요청 시 'QUIT' 문자열을 반환한다."""
+    종료 요청 시 'QUIT' 문자열을 반환한다.
+
+    아이디가 존재하지 않아도 비밀번호 입력까지 그대로 진행시키고 동일한
+    "비밀번호가 일치하지 않습니다" 메시지만 보여준다 - 아이디 존재 여부를
+    구분해서 알려주면 계정 존재 여부를 캐낼 수 있는 취약점(user
+    enumeration)이 되기 때문에 일부러 구분하지 않는다. 대신 아이디를
+    오타냈을 가능성을 고려해, 비밀번호를 3번 틀리면 접속을 끊는 대신
+    아이디 입력 화면으로 돌려보낸다. 다만 무제한 재시도로 브루트포스에
+    노출되지 않도록 세션 전체 누적 실패 횟수(session_state)에 별도
+    상한을 둔다."""
     user_id = rawinput(C_TITLE + f" {_label('이용자 ID')} : " + RESET).strip()
 
     if user_id.upper() == 'QUIT':
@@ -105,25 +113,27 @@ def login_prompt(users):
         return None
 
     tries = 0
+    last_error = ''
     while tries < MAX_LOGIN_TRY:
+        # 접속 배너 + 로그인 안내 박스 + ID 프롬프트까지 이미 화면 한 칸을
+        # 거의 다 채운 상태라, 그 위에 비밀번호 프롬프트/오류 메시지를 계속
+        # 이어붙이면 80x24 화면 기준으로 위쪽(상단바)이 스크롤되어 잘려
+        # 나간다. 매 시도마다 화면을 지우고 상단바만 새로 그려서 시작한다.
+        width = _draw_minimal_header()
+        if last_error:
+            rawprint(C_ERR + last_error + RESET)
         password = hidden_input(C_TITLE + f" {_label('비밀번호')} : " + RESET)
         hashed = hashlib.sha256(password.encode()).hexdigest()
 
         if user_id in users and users[user_id]['password'] == hashed:
             user_info = users[user_id]
-            width_cfg = user_info.get('width', 0)
-            height_cfg = user_info.get('height', 0)
-            if width_cfg > 0 and height_cfg > 0:
-                tui.SCREEN_WIDTH = width_cfg
-                tui.SCREEN_HEIGHT = height_cfg
 
             last_login = user_info.get('last_login')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             users[user_id]['last_login'] = now
             save_users(users)
 
-            width, _ = get_screen_size()
-            rawprint('\n')
+            width = _draw_minimal_header()
             box_top(width, '로그인 성공')
             box_line(f"{user_info.get('name', user_id)}({user_id})님, 반갑습니다!", width)
             if last_login:
@@ -138,12 +148,17 @@ def login_prompt(users):
             return user_id
 
         tries += 1
+        session_state['total_fails'] += 1
+        if session_state['total_fails'] >= MAX_TOTAL_TRY:
+            rawprint(C_ERR + "\n로그인 시도 횟수를 초과하였습니다. 접속을 종료합니다.\n" + RESET)
+            sys.exit(0)
+
         remain = MAX_LOGIN_TRY - tries
         if remain > 0:
-            rawprint(C_ERR + f"\n 비밀번호가 일치하지 않습니다. (남은 시도: {remain}회)\n" + RESET)
+            last_error = f"\n 비밀번호가 일치하지 않습니다. (남은 시도: {remain}회)\n\n"
         else:
-            rawprint(C_ERR + "\n 비밀번호를 3회 잘못 입력하였습니다. 접속을 종료합니다.\n" + RESET)
-            sys.exit(0)
+            rawprint(C_ERR + "\n 비밀번호를 3회 잘못 입력하였습니다. 아이디를 다시 확인해 주세요.\n" + RESET)
+            rawinput("계속하려면 Enter를 누르세요.\n")
 
     return None
 
@@ -193,11 +208,15 @@ def register(users):
 
     profile = collect_profile()
 
+    # 첫 가입자는 관리자 지정할 방법이 아직 없으니 자동으로 관리자 권한을 준다
+    # (개인 BBS는 보통 sysop이 첫 계정이라 이게 자연스러운 기본값).
+    is_first_user = len(users) == 0
+
     users[username] = {
         'password': hashlib.sha256(password1.encode()).hexdigest(),
         'last_login': None,
         **profile,
-        'is_admin': False,
+        'is_admin': is_first_user,
     }
 
     while True:
@@ -221,68 +240,20 @@ def register(users):
     return username
 
 
-def collect_profile():
-    try:
-        width = int(rawinput("화면 칸 수 (자동: 0): "))
-    except ValueError:
-        width = 0
-    try:
-        height = int(rawinput("화면 줄 수 (자동: 0): "))
-    except ValueError:
-        height = 0
-
-    return {
-        'name': rawinput("이름: "),
-        'sex': rawinput("성별 (M/F): ").upper(),
-        'birthday': rawinput("생년월일 (YYYYMMDD): "),
-        'post': rawinput("우편번호: "),
-        'home_addr': rawinput("집 주소: "),
-        'home_tel': rawinput("집 전화번호: "),
-        'office_name': rawinput("직장명: "),
-        'office_tel': rawinput("직장 전화번호: "),
-        'width': width,
-        'height': height,
-    }
-
-
 def login_menu():
     users = load_users()
     # 로그인 재시도마다가 아니라 실제 접속(전화 연결) 당 한 번만 집계한다.
     visit_stats = stats_mod.record_visit()
     quote = pick_quote()
+    # 아이디를 바꿔가며 다시 시도해도 실패 횟수는 이 세션 안에서 계속 누적된다.
+    session_state = {'total_fails': 0}
     while True:
         draw_splash(visit_stats, quote)
         draw_login_box()
-        result = login_prompt(users)
+        result = login_prompt(users, session_state)
         if result == 'QUIT':
             rawprint(C_OK + "\n다음에 또 만나요!\n" + RESET)
             break
         elif result:
             main_menu(result)
         # 실패/취소 시 다시 접속 화면부터
-
-
-def show_user_info(username, users, admin_mode=False):
-    user = users.get(username)
-    if not user:
-        rawprint(C_ERR + "사용자 정보를 찾을 수 없습니다.\n" + RESET)
-        return
-
-    width, _ = get_screen_size()
-    box_top(width, '신청 내역')
-    box_line(f" 1 아   이   디 : {username}", width)
-    box_line(f" 2 비 밀  번 호 : {'*' * 8}", width)
-    box_line(f" 3 이        름 : {user.get('name', '')}", width)
-    box_line(f" 4 성        별 : {user.get('sex', '')}", width)
-    box_line(f" 5 생 년  월 일 : {user.get('birthday', '')}", width)
-    box_line(f" 6 우 편  번 호 : {user.get('post', '')}", width)
-    box_line(f" 7 집   주   소 : {user.get('home_addr', '')}", width)
-    box_line(f" 8 집   전   화 : {user.get('home_tel', '')}", width)
-    box_line(f" 9 직   장   명 : {user.get('office_name', '')}", width)
-    box_line(f"10 직 장  전 화 : {user.get('office_tel', '')}", width)
-    box_line(f"11 화면   칸 수 : {user.get('width', 0)}", width)
-    box_line(f"12 화면   줄 수 : {user.get('height', 0)}", width)
-    if admin_mode and user.get('is_admin'):
-        box_sep(width)
-        box_line("== 이 계정은 관리자 권한을 가지고 있습니다 ==", width)
-    box_bottom(width)
