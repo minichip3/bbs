@@ -8,6 +8,7 @@ from bbsio.tui import (
     box_top, box_bottom, box_line, box_sep, get_screen_size,
 )
 from wcwidth import wcswidth
+from core import mail
 
 POST_FILE = os.path.join('data', 'posts.json')
 SITE_NAME = "M I N I - T E L"
@@ -134,9 +135,18 @@ def main_menu(username):
             box_line(format_board_entry(i + 1, board_name, board_id, post_count, width), width)
 
         box_bottom(width)
-        draw_footer("번호 선택 (게시판 ID 직접 입력도 가능)  [X:종료]", width)
+        mail_hint = C_TITLE + "[M:쪽지" + RESET
+        unread = mail.unread_count(username)
+        if unread > 0:
+            mail_hint += C_ERR + f"({unread})" + RESET
+        mail_hint += C_TITLE + "]" + RESET
+        draw_footer(f"번호 선택 (게시판 ID 직접 입력도 가능)  {mail_hint}  [X:종료]", width)
 
         choice = command_input(C_TITLE + " > " + RESET).strip().lower()
+
+        if choice in ('m', '쪽지', 'mail'):
+            mail.mail_menu(username)
+            continue
 
         board = None
         try:

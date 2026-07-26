@@ -12,6 +12,10 @@ def initialize():
         with open("data/posts.json", "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
 
+    if not os.path.exists("data/messages.json"):
+        with open("data/messages.json", "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+
     if not os.path.exists("data/login_banner.txt"):
         with open("data/login_banner.txt", "w", encoding="utf-8") as f:
             f.write("RETRO BBS\n\n")
