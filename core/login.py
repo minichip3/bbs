@@ -82,10 +82,20 @@ def draw_login_box():
     rawprint('\n')
 
 
+# "이용자 ID"(9칸)와 "비밀번호"(8칸)처럼 라벨 글자 폭이 서로 달라서, 뒤에
+# 같은 개수의 공백을 붙이면 콜론 위치가 어긋나 보였다. wcswidth 기준으로
+# 라벨 폭을 맞춰서 콜론이 항상 같은 칸에 오도록 한다 (기존 간격 그대로 유지).
+LABEL_WIDTH = 16
+
+
+def _label(text):
+    return pad(text, LABEL_WIDTH)
+
+
 def login_prompt(users):
     """ID/비밀번호를 받아 로그인 처리. 성공 시 username, 취소 시 None,
     종료 요청 시 'QUIT' 문자열을 반환한다."""
-    user_id = rawinput(C_TITLE + " 이용자 ID       : " + RESET).strip()
+    user_id = rawinput(C_TITLE + f" {_label('이용자 ID')} : " + RESET).strip()
 
     if user_id.upper() == 'QUIT':
         return 'QUIT'
@@ -96,7 +106,7 @@ def login_prompt(users):
 
     tries = 0
     while tries < MAX_LOGIN_TRY:
-        password = hidden_input(C_TITLE + " 비밀번호       : " + RESET)
+        password = hidden_input(C_TITLE + f" {_label('비밀번호')} : " + RESET)
         hashed = hashlib.sha256(password.encode()).hexdigest()
 
         if user_id in users and users[user_id]['password'] == hashed:
