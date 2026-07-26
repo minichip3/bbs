@@ -54,11 +54,6 @@ def collect_profile():
         'name': rawinput("이름: "),
         'sex': rawinput("성별 (M/F): ").upper(),
         'birthday': rawinput("생년월일 (YYYYMMDD): "),
-        'post': rawinput("우편번호: "),
-        'home_addr': rawinput("집 주소: "),
-        'home_tel': rawinput("집 전화번호: "),
-        'office_name': rawinput("직장명: "),
-        'office_tel': rawinput("직장 전화번호: "),
         'width': width,
         'height': height,
     }
@@ -77,13 +72,8 @@ def show_user_info(username, users, admin_mode=False):
     box_line(f" 3 이        름 : {user.get('name', '')}", width)
     box_line(f" 4 성        별 : {user.get('sex', '')}", width)
     box_line(f" 5 생 년  월 일 : {user.get('birthday', '')}", width)
-    box_line(f" 6 우 편  번 호 : {user.get('post', '')}", width)
-    box_line(f" 7 집   주   소 : {user.get('home_addr', '')}", width)
-    box_line(f" 8 집   전   화 : {user.get('home_tel', '')}", width)
-    box_line(f" 9 직   장   명 : {user.get('office_name', '')}", width)
-    box_line(f"10 직 장  전 화 : {user.get('office_tel', '')}", width)
-    box_line(f"11 화면   칸 수 : {user.get('width', 0)}", width)
-    box_line(f"12 화면   줄 수 : {user.get('height', 0)}", width)
+    box_line(f" 6 화면   칸 수 : {user.get('width', 0)}", width)
+    box_line(f" 7 화면   줄 수 : {user.get('height', 0)}", width)
     if admin_mode and user.get('is_admin'):
         box_sep(width)
         box_line("== 이 계정은 관리자 권한을 가지고 있습니다 ==", width)
