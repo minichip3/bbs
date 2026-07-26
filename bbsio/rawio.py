@@ -1,4 +1,5 @@
 import sys
+import os
 import select
 import tty
 import termios
@@ -45,7 +46,14 @@ def _read_byte_with_timeout(fd):
     ready, _, _ = select.select([fd], [], [], IDLE_TIMEOUT_SECONDS)
     if not ready:
         raise SessionIdleTimeout(f'{IDLE_TIMEOUT_SECONDS}초간 입력 없음')
-    byte = sys.stdin.buffer.read(1)
+    # sys.stdin.buffer.read(1)은 내부 BufferedReader가 select()가 감시하는
+    # raw fd보다 더 많은 바이트를 미리 읽어들여 버퍼링할 수 있다. 그러면
+    # 다음 바이트를 위한 select()가 "대기 중인 데이터 없음"으로 착각해
+    # 블로킹하는 동안, 실제로는 이미 버퍼에 도착해 있던 멀티바이트(한글)
+    # 문자의 나머지 바이트가 다음 문자 타이밍에 뒤섞여 읽혀 입력이
+    # 깨지는 현상이 발생한다. os.read()는 buffering 없이 raw fd에서
+    # 직접 읽으므로 select()의 감시 대상과 항상 일치한다.
+    byte = os.read(fd, 1)
     if not byte:
         # PTY 반대편(모뎀 중계)이 닫힘 - 회선이 끊긴 것으로 간주
         raise SessionIdleTimeout('입력 스트림 종료(EOF)')
