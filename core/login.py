@@ -15,25 +15,15 @@ from bbsio.rawio import rawinput, hidden_input
 from core.board import main_menu
 from core import stats as stats_mod
 from core import mail
+from core.profile import (
+    load_users, save_users, collect_profile, show_user_info,
+)
 
 QUOTES_FILE = os.path.join('data', 'quotes.txt')
 
-USER_FILE = os.path.join('data', 'users.json')
 MAX_LOGIN_TRY = 3
 
 SITE_NAME = "M I N I - T E L"
-
-
-def load_users():
-    if not os.path.exists(USER_FILE):
-        return {}
-    with open(USER_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def save_users(users):
-    with open(USER_FILE, 'w', encoding='utf-8') as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
 
 
 def pick_quote():
@@ -193,11 +183,15 @@ def register(users):
 
     profile = collect_profile()
 
+    # 첫 가입자는 관리자 지정할 방법이 아직 없으니 자동으로 관리자 권한을 준다
+    # (개인 BBS는 보통 sysop이 첫 계정이라 이게 자연스러운 기본값).
+    is_first_user = len(users) == 0
+
     users[username] = {
         'password': hashlib.sha256(password1.encode()).hexdigest(),
         'last_login': None,
         **profile,
-        'is_admin': False,
+        'is_admin': is_first_user,
     }
 
     while True:
@@ -221,30 +215,6 @@ def register(users):
     return username
 
 
-def collect_profile():
-    try:
-        width = int(rawinput("화면 칸 수 (자동: 0): "))
-    except ValueError:
-        width = 0
-    try:
-        height = int(rawinput("화면 줄 수 (자동: 0): "))
-    except ValueError:
-        height = 0
-
-    return {
-        'name': rawinput("이름: "),
-        'sex': rawinput("성별 (M/F): ").upper(),
-        'birthday': rawinput("생년월일 (YYYYMMDD): "),
-        'post': rawinput("우편번호: "),
-        'home_addr': rawinput("집 주소: "),
-        'home_tel': rawinput("집 전화번호: "),
-        'office_name': rawinput("직장명: "),
-        'office_tel': rawinput("직장 전화번호: "),
-        'width': width,
-        'height': height,
-    }
-
-
 def login_menu():
     users = load_users()
     # 로그인 재시도마다가 아니라 실제 접속(전화 연결) 당 한 번만 집계한다.
@@ -260,29 +230,3 @@ def login_menu():
         elif result:
             main_menu(result)
         # 실패/취소 시 다시 접속 화면부터
-
-
-def show_user_info(username, users, admin_mode=False):
-    user = users.get(username)
-    if not user:
-        rawprint(C_ERR + "사용자 정보를 찾을 수 없습니다.\n" + RESET)
-        return
-
-    width, _ = get_screen_size()
-    box_top(width, '신청 내역')
-    box_line(f" 1 아   이   디 : {username}", width)
-    box_line(f" 2 비 밀  번 호 : {'*' * 8}", width)
-    box_line(f" 3 이        름 : {user.get('name', '')}", width)
-    box_line(f" 4 성        별 : {user.get('sex', '')}", width)
-    box_line(f" 5 생 년  월 일 : {user.get('birthday', '')}", width)
-    box_line(f" 6 우 편  번 호 : {user.get('post', '')}", width)
-    box_line(f" 7 집   주   소 : {user.get('home_addr', '')}", width)
-    box_line(f" 8 집   전   화 : {user.get('home_tel', '')}", width)
-    box_line(f" 9 직   장   명 : {user.get('office_name', '')}", width)
-    box_line(f"10 직 장  전 화 : {user.get('office_tel', '')}", width)
-    box_line(f"11 화면   칸 수 : {user.get('width', 0)}", width)
-    box_line(f"12 화면   줄 수 : {user.get('height', 0)}", width)
-    if admin_mode and user.get('is_admin'):
-        box_sep(width)
-        box_line("== 이 계정은 관리자 권한을 가지고 있습니다 ==", width)
-    box_bottom(width)
