@@ -79,13 +79,13 @@ def hline(width, ch='-'):
 
 
 def draw_top_bar(site_title, right_text, width=None):
-    """상단 상태 바 - 좌측 서비스명, 우측 시각/사용자 정보를 청록 배경에 흰 글씨로."""
+    """상단 상태 바 - 배경색 없이(터미널 기본 검은 배경 유지), 좌측 서비스명은
+    굵은 노랑, 우측 시각/사용자 정보는 청록으로 구분하고 밑줄을 긋는다."""
     if width is None:
         width, _ = get_screen_size()
-    gap = max(1, width - wcswidth(site_title) - wcswidth(right_text) - 2)
-    bar = f" {site_title}{' ' * gap}{right_text} "
-    bar = pad(bar, width)
-    rawprint(BG_CYAN + FG_WHITE + BOLD + bar + RESET + '\n')
+    gap = max(1, width - wcswidth(site_title) - wcswidth(right_text) - 1)
+    rawprint(C_TITLE + site_title + RESET + (' ' * gap) + C_DIM + right_text + RESET + '\n')
+    rawprint(hline(width) + '\n')
 
 
 def draw_header(title, right_text='', width=None):
