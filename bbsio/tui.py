@@ -74,7 +74,7 @@ def pad(text, width, align='left'):
     return text + ' ' * fill
 
 
-def hline(width, ch='─'):
+def hline(width, ch='-'):
     return C_BORDER + (ch * width) + RESET
 
 
@@ -114,21 +114,21 @@ def box_top(width, title=''):
         remain = width - 2 - wcswidth(t)
         left = remain // 2
         right = remain - left
-        rawprint(C_BORDER + '┌' + ('─' * left) + RESET + C_TITLE + t + RESET +
-                  C_BORDER + ('─' * right) + '┐' + RESET + '\n')
+        rawprint(C_BORDER + '+' + ('-' * left) + RESET + C_TITLE + t + RESET +
+                  C_BORDER + ('-' * right) + '+' + RESET + '\n')
     else:
-        rawprint(C_BORDER + '┌' + ('─' * (width - 2)) + '┐' + RESET + '\n')
+        rawprint(C_BORDER + '+' + ('-' * (width - 2)) + '+' + RESET + '\n')
 
 
 def box_bottom(width):
-    rawprint(C_BORDER + '└' + ('─' * (width - 2)) + '┘' + RESET + '\n')
+    rawprint(C_BORDER + '+' + ('-' * (width - 2)) + '+' + RESET + '\n')
 
 
 def box_line(text, width, align='left'):
     inner = width - 4
     content = pad(text, inner, align)
-    rawprint(C_BORDER + '│ ' + RESET + C_TEXT + content + RESET + C_BORDER + ' │' + RESET + '\n')
+    rawprint(C_BORDER + '| ' + RESET + C_TEXT + content + RESET + C_BORDER + ' |' + RESET + '\n')
 
 
 def box_sep(width):
-    rawprint(C_BORDER + '├' + ('─' * (width - 2)) + '┤' + RESET + '\n')
+    rawprint(C_BORDER + '+' + ('-' * (width - 2)) + '+' + RESET + '\n')
