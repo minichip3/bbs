@@ -15,6 +15,12 @@ IDLE_TIMEOUT_SECONDS = 180
 class SessionIdleTimeout(Exception):
     pass
 
+class ConnectionClosed(Exception):
+    # 진짜 무입력 타임아웃이 아니라, 상대(모뎀/텔넷)가 정상적으로 연결을
+    # 끊어서 입력 스트림이 EOF된 경우. 둘 다 예전엔 SessionIdleTimeout
+    # 하나로 뭉뚱그려져서 정상 종료인데도 로그에 "타임아웃"으로 찍혔었다.
+    pass
+
 def set_encoding(enc):
     global current_encoding
     current_encoding = enc
@@ -36,7 +42,11 @@ def rawprint(text: str, encoding=None):
     if encoding is None:
         encoding = current_encoding
     try:
-        encoded = text.encode(encoding, errors='replace')
+        # PTY가 raw 모드라 OPOST/ONLCR이 꺼져 있어 커널이 \n -> \r\n 변환을
+        # 해주지 않는다. 여기서 명시적으로 정규화해야 클라이언트 터미널에서
+        # 줄바꿈이 계단식으로 깨지지 않는다 (커서만 아래로 가고 컬럼 복귀 안 됨).
+        normalized = text.replace('\r\n', '\n').replace('\n', '\r\n')
+        encoded = normalized.encode(encoding, errors='replace')
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
     except Exception as e:
@@ -46,36 +56,64 @@ def _read_byte_with_timeout(fd):
     ready, _, _ = select.select([fd], [], [], IDLE_TIMEOUT_SECONDS)
     if not ready:
         raise SessionIdleTimeout(f'{IDLE_TIMEOUT_SECONDS}초간 입력 없음')
-    # sys.stdin.buffer.read(1)은 내부 BufferedReader가 select()가 감시하는
-    # raw fd보다 더 많은 바이트를 미리 읽어들여 버퍼링할 수 있다. 그러면
-    # 다음 바이트를 위한 select()가 "대기 중인 데이터 없음"으로 착각해
-    # 블로킹하는 동안, 실제로는 이미 버퍼에 도착해 있던 멀티바이트(한글)
-    # 문자의 나머지 바이트가 다음 문자 타이밍에 뒤섞여 읽혀 입력이
-    # 깨지는 현상이 발생한다. os.read()는 buffering 없이 raw fd에서
-    # 직접 읽으므로 select()의 감시 대상과 항상 일치한다.
+    # sys.stdin.buffer(BufferedReader)로 읽으면 안 된다 - 1바이트만
+    # 요청해도 내부적으로 커널에서 더 많은 바이트를 미리 당겨와 유저스페이스
+    # 버퍼에 쌓아두는데, 위 select()는 커널 큐만 보기 때문에 이미 버퍼에
+    # 들어와 있는(하지만 아직 안 돌려준) 바이트를 "데이터 없음"으로 착각해서
+    # 영원히 대기하는 버그가 있었다 (두 번째 문자부터 응답이 없어지는 원인 -
+    # 예: '1'을 보내면 '1'은 읽히는데 ''이 이미 BufferedReader
+    # 내부 버퍼에 들어간 채로 select()가 다음 바이트를 영원히 기다림).
+    # os.read()는 버퍼링 없이 커널에서 직접 읽으므로 select()와 짝이 맞는다.
     byte = os.read(fd, 1)
     if not byte:
-        # PTY 반대편(모뎀 중계)이 닫힘 - 회선이 끊긴 것으로 간주
-        raise SessionIdleTimeout('입력 스트림 종료(EOF)')
+        # PTY 반대편(모뎀/텔넷 중계)이 닫힘 - 회선이 정상적으로 끊긴 것
+        raise ConnectionClosed('입력 스트림 종료(EOF)')
     return byte
 
-def getchar():
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        byte = _read_byte_with_timeout(fd)
-        while True:
-            try:
-                ch = byte.decode(current_encoding)
-                return ch
-            except UnicodeDecodeError:
-                # 한글 EUC-KR처럼 멀티바이트 문자일 경우 계속 읽음
-                byte += _read_byte_with_timeout(fd)
+def _expected_char_len(first_byte, encoding):
+    """첫 바이트만 보고 이 문자가 총 몇 바이트인지 정확히 계산한다.
+    예전엔 디코딩이 실패하면 "일단 최대 4바이트까지 계속 먹어보고 그래도
+    안 되면 포기"하는 식이었는데, EUC-KR(원래 2바이트)에서 단 한 바이트만
+    깨져도 다음 정상 글자의 바이트까지 같이 집어삼켜버리는 원인이었다
+    (회선 노이즈로 바이트 하나가 깨지면 그 뒤에 오는 멀쩡한 한 글자 전체가
+    함께 유실 - 타이핑 중 몇 글자씩 씹히고, 그만큼 백스페이스 커서 이동량도
+    어긋나서 UI 테두리까지 지워지는 버그로 이어졌음). 인코딩별 실제 문자
+    길이만큼만 정확히 읽으면 손상 범위가 그 문자 하나로 국한된다."""
+    b = first_byte[0]
+    if encoding == 'utf-8':
+        if b < 0x80:
+            return 1
+        elif b & 0xE0 == 0xC0:
+            return 2
+        elif b & 0xF0 == 0xE0:
+            return 3
+        elif b & 0xF8 == 0xF0:
+            return 4
+        else:
+            return 1  # 유효하지 않은 선행 바이트 - 한 바이트짜리 쓰레기로 취급
+    else:  # euc-kr, johab 등 - 완성형/조합형 모두 최상위 비트가 서 있으면 2바이트
+        return 2 if b >= 0x80 else 1
 
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+def getchar():
+    # 예전엔 매 호출마다 tty.setraw(fd)를 다시 걸었는데, 이게 내부적으로
+    # TCSAFLUSH를 써서 "아직 안 읽은 입력 버퍼"를 통째로 버려버리는 부작용이
+    # 있었다 - 한 글자 처리하고 다음 글자 읽으려는 순간, 이미 도착해서
+    # 커널 버퍼에 대기 중이던 다음 글자의 바이트가 그대로 삭제되는 버그였음
+    # (한글 멀티바이트 입력 중간 글자가 씹히는 원인). raw 모드는 dialup.py가
+    # PTY 만들 때 이미 한 번 걸어두므로 여기서 매번 다시 걸 필요가 없다.
+    fd = sys.stdin.fileno()
+    first = _read_byte_with_timeout(fd)
+    length = _expected_char_len(first, current_encoding)
+    raw = first
+    while len(raw) < length:
+        raw += _read_byte_with_timeout(fd)
+    try:
+        return raw.decode(current_encoding)
+    except UnicodeDecodeError:
+        # 정확히 기대한 바이트 수만큼만 읽었는데도 깨져 있으면 진짜 회선
+        # 노이즈 - 이 문자 하나만 대체문자로 포기하고, 다음 바이트부터는
+        # 건드리지 않는다 (뒤따라오는 글자를 더 이상 잡아먹지 않음).
+        return '�'
 
 def rawinput(prompt='', encoding=None) -> str:
     if encoding is None:
@@ -93,9 +131,9 @@ def rawinput(prompt='', encoding=None) -> str:
                 last = buffer.pop()
                 width = wcwidth(last)
                 if width > 0:
-                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint('\b' * width, encoding)
                     rawprint(' ' * width, encoding)
-                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint('\b' * width, encoding)
         elif ch == '\x1b':  # Start of escape sequence
             seq = ch + getchar()
             if seq.endswith('['):
@@ -134,9 +172,9 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
                 last = buffer.pop()
                 width = wcwidth(last)
                 if width > 0:
-                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint('\b' * width, encoding)
                     rawprint(' ', encoding)
-                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint('\b' * width, encoding)
         elif ch == '\x1b':  # Escape sequence
             seq = ch + getchar()
             if seq.endswith('['):
@@ -188,9 +226,9 @@ def command_input(prompt=' > ', encoding=None) -> str:
                     last = buffer.pop()
                     width = wcwidth(last)
                     if width > 0:
-                        rawprint('\x1b[{}D'.format(width), encoding)
+                        rawprint('\b' * width, encoding)
                         rawprint(' ' * width, encoding)
-                        rawprint('\x1b[{}D'.format(width), encoding)
+                        rawprint('\b' * width, encoding)
             elif ch == '\x1b':
                 seq = ch + getchar()
                 if seq.endswith('['):
@@ -235,9 +273,9 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
                 width = wcwidth(last)
                 lines[current_line] = lines[current_line][:-1]
                 if width > 0:
-                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint('\b' * width, encoding)
                     rawprint(' ' * width, encoding)
-                    rawprint('\x1b[{}D'.format(width), encoding)
+                    rawprint('\b' * width, encoding)
             else:
                 if current_line > 0:
                     lines.pop()
