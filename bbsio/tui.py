@@ -1,7 +1,22 @@
 """하이텔풍 화면 렌더링 유틸리티 (색상/박스 문자/헤더-풋터 바)."""
+import re
 from bbsio.rawio import rawprint
 from wcwidth import wcswidth
 import shutil
+
+# board.py의 format_board_entry()처럼 색상 코드(ESC 시퀀스)를 이미 섞어
+# 만든 문자열을 pad()/box_line()에 그대로 넘기는 경우가 있는데, 그러면
+# ESC 시퀀스 바이트까지 "보이는 글자"로 세어져서 패딩 계산이 틀어지고
+# 박스 테두리가 줄마다 다르게 어긋나는 문제가 있었다. 폭을 잴 때는 항상
+# ESC 시퀀스를 먼저 걷어내고 계산한다.
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _visible_width(text):
+    w = wcswidth(_ANSI_RE.sub('', text))
+    if w < 0:
+        w = len(_ANSI_RE.sub('', text))
+    return w
 
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 24
@@ -52,18 +67,30 @@ def color(text, code):
 
 
 def pad(text, width, align='left'):
-    """wcswidth 기준으로 폭을 맞춰 채운다 (한글 2칸 폭 고려)."""
-    w = wcswidth(text)
-    if w < 0:
-        w = len(text)
+    """보이는 폭(wcswidth, 한글 2칸 + ESC 시퀀스 제외) 기준으로 폭을 맞춰 채운다."""
+    w = _visible_width(text)
     if w >= width:
-        # 넘치면 잘라낸다
-        trimmed = ""
-        for c in text:
-            if wcswidth(trimmed + c) > width:
+        # 넘치면 잘라낸다 - ESC 시퀀스는 그대로 통과시키고, 보이는 문자만
+        # 세면서 자른다.
+        result = ""
+        visible = 0
+        i = 0
+        while i < len(text):
+            m = _ANSI_RE.match(text, i)
+            if m:
+                result += m.group(0)
+                i = m.end()
+                continue
+            c = text[i]
+            cw = wcswidth(c)
+            if cw < 0:
+                cw = 1
+            if visible + cw > width:
                 break
-            trimmed += c
-        return trimmed
+            result += c
+            visible += cw
+            i += 1
+        return result
     fill = width - w
     if align == 'right':
         return ' ' * fill + text
