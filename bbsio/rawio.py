@@ -66,17 +66,6 @@ def rawprint(text: str, encoding=None):
     except Exception as e:
         sys.stdout.write(f"[출력 오류] {e}\n")
 
-def _redraw_line(prompt, text, encoding, mask=False):
-    """백스페이스 등으로 줄 내용이 바뀔 때마다, 지금까지 서버가 처리한
-    한 칸씩 커서를 옮기는 방식이었는데, 화면(minicom 등)이 렌더링을
-    놓치거나 타이밍이 어긋나면 서버가 아는 커서 위치와 실제 화면 위치가
-    어긋나서 입력 줄 밖(박스 테두리)까지 지워버리는 문제가 있었다.
-    매번 줄 전체를 지우고 서버가 갖고 있는 진짜 버퍼 내용으로 처음부터
-    다시 그리면, 중간에 화면이 어떻게 어긋나 있었든 이 순간부터는 항상
-    올바른 상태로 재동기화된다."""
-    shown = ('*' * len(text)) if mask else text
-    rawprint('\r\x1b[K' + prompt + shown, encoding)
-
 def _read_byte_with_timeout(fd):
     ready, _, _ = select.select([fd], [], [], IDLE_TIMEOUT_SECONDS)
     if not ready:
@@ -154,8 +143,12 @@ def rawinput(prompt='', encoding=None) -> str:
             return ''.join(buffer)
         elif ord(ch) in (8, 127):  # Backspace: ^H or DEL
             if buffer:
-                buffer.pop()
-                _redraw_line(prompt, ''.join(buffer), encoding)
+                last = buffer.pop()
+                width = wcwidth(last)
+                if width > 0:
+                    rawprint('\b' * width, encoding)
+                    rawprint(' ' * width, encoding)
+                    rawprint('\b' * width, encoding)
         elif ch == '\x1b':  # Start of escape sequence
             seq = ch + getchar()
             if seq.endswith('['):
@@ -193,8 +186,12 @@ def hidden_input(prompt='비밀번호: ', encoding=None) -> str:
             return ''.join(buffer)
         elif ord(ch) in (8, 127):  # Backspace: ^H or DEL
             if buffer:
-                buffer.pop()
-                _redraw_line(prompt, ''.join(buffer), encoding, mask=True)
+                last = buffer.pop()
+                width = wcwidth(last)
+                if width > 0:
+                    rawprint('\b' * width, encoding)
+                    rawprint(' ', encoding)
+                    rawprint('\b' * width, encoding)
         elif ch == '\x1b':  # Escape sequence
             seq = ch + getchar()
             if seq.endswith('['):
@@ -245,8 +242,12 @@ def command_input(prompt=' > ', encoding=None) -> str:
                 return command
             elif ord(ch) in (8, 127):  # Backspace
                 if buffer:
-                    buffer.pop()
-                    _redraw_line(prompt, ''.join(buffer), encoding)
+                    last = buffer.pop()
+                    width = wcwidth(last)
+                    if width > 0:
+                        rawprint('\b' * width, encoding)
+                        rawprint(' ' * width, encoding)
+                        rawprint('\b' * width, encoding)
             elif ch == '\x1b':
                 seq = ch + getchar()
                 if seq.endswith('['):
@@ -289,8 +290,13 @@ def multiline_input(prompt='내용 입력 (한 줄에 . 입력 시 종료)', enc
             rawprint('\n', encoding)
         elif ord(ch) in (8, 127):  # Backspace
             if lines[current_line]:
+                last = lines[current_line][-1]
+                width = wcwidth(last)
                 lines[current_line] = lines[current_line][:-1]
-                _redraw_line('', lines[current_line], encoding)
+                if width > 0:
+                    rawprint('\b' * width, encoding)
+                    rawprint(' ' * width, encoding)
+                    rawprint('\b' * width, encoding)
             else:
                 if current_line > 0:
                     lines.pop()
