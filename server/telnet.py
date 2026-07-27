@@ -61,11 +61,19 @@ def is_rate_limited(ip):
     return False
 
 
+_IAC_COMMANDS = (WILL, WONT, DO, DONT)
+
+
 def strip_telnet_iac(data):
     # 소켓으로 들어오는 바이트 중 telnet IAC 명령 시퀀스(IAC+WILL/WONT/DO/DONT+옵션,
     # 총 3바이트)를 걸러내서 bbs.py한테 진짜 입력인 것처럼 넘어가지 않게 한다.
     # IAC IAC(0xFF 0xFF)는 데이터 안의 리터럴 0xFF 한 바이트를 뜻하는 이스케이프라
     # 별도로 처리한다. 완전한 telnet 상태머신은 아니지만 이 용도엔 충분함.
+    #
+    # 주의: IAC 뒤에 오는 바이트가 실제로 WILL/WONT/DO/DONT일 때만 커맨드로 보고
+    # 3바이트를 스킵해야 한다. 그렇지 않으면 XModem 등 바이너리 전송 중에 등장하는
+    # 리터럴 0xFF 데이터 바이트(체크섬, CRC, 블록 번호 등)를 커맨드로 오인해서
+    # 뒤따르는 진짜 데이터 2바이트까지 함께 먹어버려 전송이 깨진다.
     out = bytearray()
     i = 0
     n = len(data)
@@ -76,9 +84,21 @@ def strip_telnet_iac(data):
                 out.append(IAC)
                 i += 2
                 continue
-            # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고 스킵.
-            # 마지막에 IAC만 딱 걸리고 뒤가 아직 안 왔으면(드문 케이스) 그냥 버림.
-            i += 3
+            if i + 2 < n and data[i + 1] in _IAC_COMMANDS:
+                # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고 스킵.
+                i += 3
+                continue
+            if i + 1 >= n:
+                # 스트림 끝에 IAC 하나만 걸린 드문 경우 - 다음 recv()에서 이어질
+                # 커맨드 시퀀스일 수도 있으나 여기선 완전한 상태머신이 아니므로
+                # 리터럴 데이터로 취급해 그냥 통과시킨다.
+                out.append(b)
+                i += 1
+                continue
+            # IAC 다음 바이트가 WILL/WONT/DO/DONT가 아니면 telnet 커맨드가
+            # 아니라 리터럴 데이터 바이트로 취급하고 한 바이트만 소비한다.
+            out.append(b)
+            i += 1
             continue
         out.append(b)
         i += 1
