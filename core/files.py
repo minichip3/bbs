@@ -10,6 +10,7 @@ from bbsio.tui import (
     box_top, box_bottom, box_line, box_sep, get_screen_size,
 )
 from bbsio.xfer.xmodem import XModemSender, XModemReceiver, XModemError
+from bbsio.xfer.zmodem import ZModemSender, ZModemReceiver, ZModemError
 from core.profile import is_admin
 
 INDEX_FILE = os.path.join('data', 'file_index.json')
@@ -102,7 +103,7 @@ def file_board_menu(username, board):
                             f"{entry['uploader']:<12} {entry['date']}{RESET}")
                     box_line(line, width)
             box_bottom(width)
-            draw_footer("[번호:정보/받기] [U:올리기] [F:다음] [B:이전] [P:뒤로]", width)
+            draw_footer("[번호:정보/받기] [U:올리기] [Z:Z업로드] [G:Z받기] [F:다음] [B:이전] [P:뒤로]", width)
 
             cmd = command_input(C_TITLE + " > " + RESET).strip().lower()
 
@@ -110,6 +111,20 @@ def file_board_menu(username, board):
                 break
             elif cmd == 'u':
                 upload_file(username)
+            elif cmd == 'z':
+                zmodem_upload(username)
+            elif cmd == 'g':
+                sel_str = rawinput(C_TITLE + "받을 자료 번호: " + RESET).strip()
+                try:
+                    sel = int(sel_str)
+                    if 1 <= sel <= len(entries):
+                        zmodem_download(entries[sel - 1])
+                    else:
+                        rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
+                        rawinput("계속하려면 Enter를 누르세요.\n")
+                except ValueError:
+                    rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
+                    rawinput("계속하려면 Enter를 누르세요.\n")
             elif cmd in ('', 'f') and end < len(entries):
                 page += 1
             elif cmd == 'b' and page > 0:
@@ -237,6 +252,61 @@ def upload_file(username):
     rawinput("계속하려면 Enter를 누르세요.\n")
 
 
+def zmodem_upload(username):
+    """XModem과 달리 파일명/크기를 사용자가 미리 입력할 필요 없이 ZMODEM(Lite)
+    핸드셰이크가 전송 중 자동으로 알려준다."""
+    rawprint('\n')
+    rawprint(C_DIM + "설명을 입력하세요 (한 줄, 생략 가능): " + RESET)
+    description = rawinput('').strip()
+
+    rawprint('\n' + C_OK +
+              "지금 터미널 프로그램에서 ZMODEM '보내기'를 시작하세요.\n" +
+              RESET + C_DIM +
+              "(파일명과 크기는 자동으로 전달됩니다. 준비되면 Enter를 누르세요.)\n" +
+              RESET)
+    rawinput('')
+
+    receiver = ZModemReceiver(max_size=MAX_UPLOAD_SIZE)
+    try:
+        _log(f'{username} ZMODEM 업로드 시작')
+        raw_filename, data = receiver.receive()
+    except ZModemError as e:
+        _log(f'{username} ZMODEM 업로드 실패: {e}')
+        rawprint(C_ERR + f"\n업로드가 실패했습니다: {e}\n" + RESET)
+        rawinput("계속하려면 Enter를 누르세요.\n")
+        return
+
+    safe_name = _safe_display_name(raw_filename)
+    if not safe_name:
+        _log(f'{username} ZMODEM 업로드 실패: 올바르지 않은 파일명({raw_filename!r})')
+        rawprint(C_ERR + "\n전송된 파일명이 올바르지 않습니다.\n" + RESET)
+        rawinput("계속하려면 Enter를 누르세요.\n")
+        return
+
+    entries = load_index()
+    next_id = max((e.get('id', 0) for e in entries), default=0) + 1
+    stored_name = f"{next_id}_{safe_name}"
+
+    _ensure_dirs()
+    with open(os.path.join(FILES_DIR, stored_name), 'wb') as f:
+        f.write(data)
+
+    entries.append({
+        'id': next_id,
+        'filename': safe_name,
+        'stored_name': stored_name,
+        'description': description,
+        'uploader': username,
+        'size': len(data),
+        'date': now_str(),
+    })
+    save_index(entries)
+
+    _log(f'{username} ZMODEM 업로드 완료: {safe_name} ({len(data)}바이트)')
+    rawprint(C_OK + f"\n업로드가 완료되었습니다! ({safe_name}, {len(data)}바이트)\n" + RESET)
+    rawinput("계속하려면 Enter를 누르세요.\n")
+
+
 def download_file(entry):
     path = os.path.join(FILES_DIR, entry['stored_name'])
     try:
@@ -266,5 +336,39 @@ def download_file(entry):
         return
 
     _log(f'다운로드 완료: {entry["filename"]} ({len(data)}바이트)')
+    rawprint(C_OK + f"\n다운로드가 완료되었습니다! ({len(data)}바이트)\n" + RESET)
+    rawinput("계속하려면 Enter를 누르세요.\n")
+
+
+def zmodem_download(entry):
+    """XModem과 달리 파일명/크기가 핸드셰이크 중 자동으로 전달되므로
+    수신측에서 따로 파일명을 지정할 필요가 없다."""
+    path = os.path.join(FILES_DIR, entry['stored_name'])
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError as e:
+        rawprint(C_ERR + f"\n파일을 읽을 수 없습니다: {e}\n" + RESET)
+        rawinput("계속하려면 Enter를 누르세요.\n")
+        return
+
+    rawprint('\n' + C_OK +
+              "지금 터미널 프로그램에서 ZMODEM '받기'를 시작하세요.\n" +
+              RESET + C_DIM +
+              "(파일명과 크기가 자동으로 전달됩니다. 준비되면 Enter를 누르세요.)\n" +
+              RESET)
+    rawinput('')
+
+    sender = ZModemSender()
+    try:
+        _log(f'ZMODEM 다운로드 시작: {entry["filename"]}')
+        sender.send(entry['filename'], data)
+    except ZModemError as e:
+        _log(f'ZMODEM 다운로드 실패: {e}')
+        rawprint(C_ERR + f"\n다운로드가 실패했습니다: {e}\n" + RESET)
+        rawinput("계속하려면 Enter를 누르세요.\n")
+        return
+
+    _log(f'ZMODEM 다운로드 완료: {entry["filename"]} ({len(data)}바이트)')
     rawprint(C_OK + f"\n다운로드가 완료되었습니다! ({len(data)}바이트)\n" + RESET)
     rawinput("계속하려면 Enter를 누르세요.\n")
