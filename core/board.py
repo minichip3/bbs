@@ -10,6 +10,7 @@ from bbsio.tui import (
 from wcwidth import wcswidth
 from core import mail
 from core import admin
+from core import files as file_board
 from core.profile import is_admin, edit_profile
 
 POST_FILE = os.path.join('data', 'posts.json')
@@ -225,6 +226,8 @@ def main_menu(username):
 
         if board_type in ('normal', 'restricted'):
             board_menu(username, board, posts)
+        elif board_type == 'file':
+            file_board.file_board_menu(username, board)
         elif board_type == 'internal':
             rawprint(f"\n[내부명령] '{board['name']}' 기능 실행 (예: 프로필 수정)\n")
             rawinput("계속하려면 Enter를 누르세요.\n")

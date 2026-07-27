@@ -27,7 +27,13 @@ def initialize():
                 {"id": "hello", "name": "안녕하세요.가입인사", "type": "normal"},
                 {"id": "bbs", "name": "자유게시판", "type": "normal"},
                 {"id": "plaza", "name": "한마당", "type": "normal"},
-                {"id": "market", "name": "장터게시판", "type": "normal"}
+                {"id": "market", "name": "장터게시판", "type": "normal"},
+                {"id": "files", "name": "자료실", "type": "file"}
             ], f, ensure_ascii=False, indent=2)
 
+    if not os.path.exists("data/file_index.json"):
+        with open("data/file_index.json", "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+
     os.makedirs("data/posts", exist_ok=True)
+    os.makedirs("data/files", exist_ok=True)
