@@ -282,6 +282,14 @@ def command_input(prompt=' > ', encoding=None) -> str:
                 if is_global_command(command):
                     handled = handle_global_command(command)
                     if handled:
+                        # 여기서 buffer를 비우지 않으면 방금 처리한 명령(예: 'x')이
+                        # 그대로 남아 있다가 다음 줄 입력 앞에 붙어버린다 - 특히
+                        # 사용자가 그냥 Enter만 치면 buffer가 그대로 재구성되어
+                        # 'x'가 다시 감지되고 exit_program()이 무한히 재실행되는
+                        # 버그였다(예: 종료 확인에 y/n 이외의 값을 입력했을 때).
+                        buffer = []
+                        last_backspace_time = 0.0
+                        rawprint(prompt, encoding)
                         continue  # 다시 입력 받기
                 return command
             elif ord(ch) in (8, 127):  # Backspace
