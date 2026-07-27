@@ -52,7 +52,7 @@ def draw_splash(visit_stats=None, quote=''):
 
     if visit_stats is not None:
         member_count = len(load_users())
-        info = (f"총 회원 {member_count}명  |  오늘 접속 {visit_stats.get('today_visits', 0)}명"
+        info = (f"총 회원 {member_count}명  |  오늘 접속 {visit_stats.get('today_visits', 0)}회"
                 f"  |  누적 접속 {visit_stats.get('total_visits', 0)}회")
         rawprint(C_DIM + pad(info, width, 'center') + RESET + '\n')
     if quote:
