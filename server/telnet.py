@@ -63,6 +63,14 @@ def is_rate_limited(ip):
 
 _IAC_COMMANDS = (WILL, WONT, DO, DONT)
 
+# 클라이언트가 보낸 협상 커맨드에 대한 응답 매핑. RFC 854상 유효한 짝만 써야 한다 -
+# 예를 들어 클라이언트가 WONT(옵션을 안 하겠다)라고 했는데 서버가 DO(그 옵션을 해달라)로
+# 답하면 클라이언트는 방금 거부한 걸 다시 요청받은 꼴이 되어 WONT를 반복 전송하게 되고,
+# 엄격한 클라이언트는 이 프로토콜 위반을 감지하고 연결을 끊어버린다. 우리는 실제로
+# 옵션별 동작을 구현하지 않으므로(완전한 상태머신 아님) 전부 거부(DONT/WONT)로 답해서
+# 매 협상을 그 자리에서 종료시킨다 - 재요청이나 서브협상이 이어질 여지를 없앤다.
+_IAC_DECLINE = {WILL: DONT, WONT: DONT, DO: WONT, DONT: WONT}
+
 
 def strip_telnet_iac(data):
     # 소켓으로 들어오는 바이트 중 telnet IAC 명령 시퀀스(IAC+WILL/WONT/DO/DONT+옵션,
@@ -74,7 +82,15 @@ def strip_telnet_iac(data):
     # 3바이트를 스킵해야 한다. 그렇지 않으면 XModem 등 바이너리 전송 중에 등장하는
     # 리터럴 0xFF 데이터 바이트(체크섬, CRC, 블록 번호 등)를 커맨드로 오인해서
     # 뒤따르는 진짜 데이터 2바이트까지 함께 먹어버려 전송이 깨진다.
+    #
+    # 커맨드를 그냥 버리기만 하면 클라이언트는 자기가 보낸 협상 커맨드에 대한
+    # 응답을 영영 못 받아서(일부 클라이언트가 협상이 안 끝났다고 보고) 60초마다
+    # 재접속을 시도하다가 결국 서버 rate limiter에 걸리는 문제가 있었다.
+    # 그래서 커맨드를 스킵하는 대신, RFC 854에 맞는 짝(_IAC_DECLINE)으로 거부
+    # 응답을 만들어 별도로 반환한다 - 완전한 협상 상태머신은 아니지만 매 요청을
+    # 그 자리에서 종료시켜서 클라이언트가 "응답받았다"고 인식하기엔 충분함.
     out = bytearray()
+    responses = bytearray()
     i = 0
     n = len(data)
     while i < n:
@@ -85,7 +101,11 @@ def strip_telnet_iac(data):
                 i += 2
                 continue
             if i + 2 < n and data[i + 1] in _IAC_COMMANDS:
-                # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고 스킵.
+                # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고
+                # bbs.py로 넘어가는 스트림에서는 스킵하되, 클라이언트에게
+                # RFC 854에 맞는 짝(_IAC_DECLINE)으로 거부 응답을 돌려준다.
+                option = data[i + 2]
+                responses.extend([IAC, _IAC_DECLINE[data[i + 1]], option])
                 i += 3
                 continue
             if i + 1 >= n:
@@ -102,7 +122,7 @@ def strip_telnet_iac(data):
             continue
         out.append(b)
         i += 1
-    return bytes(out)
+    return bytes(out), bytes(responses)
 
 
 def log_bbs_stderr(proc, tag):
@@ -143,7 +163,12 @@ def data_relay(conn, master_fd, proc, tag, ip):
                     except Exception:
                         pass
                     return
-                filtered = strip_telnet_iac(data)
+                filtered, iac_responses = strip_telnet_iac(data)
+                if iac_responses:
+                    # 클라이언트가 보낸 IAC 협상 커맨드에 대한 ACK(IAC DO <옵션>).
+                    # 이걸 안 보내면 클라이언트가 협상 미완료로 보고 60초마다
+                    # 재접속을 시도하다 rate limiter에 걸리는 문제가 있었다.
+                    conn.sendall(iac_responses)
                 if filtered:
                     now = time.time()
                     gap_ms = (now - last_recv_time[0]) * 1000
