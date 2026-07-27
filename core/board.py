@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 from datetime import datetime
 from bbsio.rawio import rawprint, rawinput, command_input, multiline_input, beep
 from bbsio.tui import (
@@ -12,6 +13,8 @@ from core import mail
 from core import admin
 from core import files as file_board
 from core.profile import is_admin, edit_profile
+from bbsio.xfer.xmodem import XModemReceiver, XModemError
+from bbsio.xfer.zmodem import ZModemReceiver, ZModemError
 
 POST_FILE = os.path.join('data', 'posts.json')
 SITE_NAME = "M I N I - T E L"
@@ -60,6 +63,66 @@ def _can_edit(username, post):
     return username == post['author'] or is_admin(username)
 
 
+def _upload_attachment():
+    """글에 첨부할 파일을 업로드 받는다. 저장 위치는 자료실(file_board)과
+    같은 디렉토리를 공유하되, 자료실 색인(file_index.json)에는 등록하지
+    않는 글 전용 첨부다. 성공하면 file_board.download_file()/
+    zmodem_download()가 그대로 받아들이는 {'filename','stored_name','size'}
+    딕셔너리를, 취소/실패 시 None을 반환한다."""
+    protocol = file_board._choose_transfer_protocol('첨부파일 업로드')
+    if protocol is None:
+        return None
+
+    if protocol == 'x':
+        display_name = rawinput(C_TITLE + "첨부파일명 : " + RESET).strip()
+        safe_name = file_board._safe_display_name(display_name)
+        if not safe_name:
+            rawprint(C_ERR + "올바른 파일명을 입력하세요.\n" + RESET)
+            rawinput("계속하려면 Enter를 누르세요.\n")
+            return None
+        rawprint('\n' + C_OK +
+                  "지금 터미널 프로그램에서 XMODEM(CRC) '보내기'를 시작하세요.\n" +
+                  RESET + C_DIM +
+                  "(업로드가 시작될 때까지 잠시 기다립니다. 준비되면 Enter를 누르세요.)\n" +
+                  RESET)
+        rawinput('')
+        receiver = XModemReceiver(max_size=file_board.MAX_UPLOAD_SIZE)
+        try:
+            data = receiver.receive()
+        except XModemError as e:
+            rawprint(C_ERR + f"\n첨부파일 업로드가 실패했습니다: {e}\n" + RESET)
+            rawinput("계속하려면 Enter를 누르세요.\n")
+            return None
+    else:
+        rawprint('\n' + C_OK +
+                  "지금 터미널 프로그램에서 ZMODEM '보내기'를 시작하세요.\n" +
+                  RESET + C_DIM +
+                  "(파일명과 크기는 자동으로 전달됩니다. 준비되면 Enter를 누르세요.)\n" +
+                  RESET)
+        rawinput('')
+        receiver = ZModemReceiver(max_size=file_board.MAX_UPLOAD_SIZE)
+        try:
+            raw_filename, data = receiver.receive()
+        except ZModemError as e:
+            rawprint(C_ERR + f"\n첨부파일 업로드가 실패했습니다: {e}\n" + RESET)
+            rawinput("계속하려면 Enter를 누르세요.\n")
+            return None
+        safe_name = file_board._safe_display_name(raw_filename)
+        if not safe_name:
+            rawprint(C_ERR + "\n전송된 파일명이 올바르지 않습니다.\n" + RESET)
+            rawinput("계속하려면 Enter를 누르세요.\n")
+            return None
+
+    file_board._ensure_dirs()
+    stored_name = f"post_{uuid.uuid4().hex[:12]}_{safe_name}"
+    with open(os.path.join(file_board.FILES_DIR, stored_name), 'wb') as f:
+        f.write(data)
+
+    rawprint(C_OK + f"\n첨부파일 업로드가 완료되었습니다! ({safe_name}, {len(data)}바이트)\n" + RESET)
+    rawinput("계속하려면 Enter를 누르세요.\n")
+    return {'filename': safe_name, 'stored_name': stored_name, 'size': len(data)}
+
+
 def view_post(post, username):
     width, height = get_screen_size()
     page = 0
@@ -83,7 +146,11 @@ def view_post(post, username):
                 box_line(line, width)
             box_bottom(width)
 
-            draw_footer("[ED:수정] [DD:삭제] [F:다음] [B:이전] [P:뒤로]", width)
+            hint = "[ED:수정] [DD:삭제] "
+            if post.get('attachment'):
+                hint += "[DL:첨부다운로드] "
+            hint += "[F:다음] [B:이전] [P:뒤로]"
+            draw_footer(hint, width)
             cmd = command_input(C_TITLE + " > " + RESET).strip().lower()
 
             if cmd == 'ed':
@@ -127,6 +194,12 @@ def view_post(post, username):
                 page -= 1
             elif cmd == 'p':
                 break
+            elif cmd == 'dl' and post.get('attachment'):
+                protocol = file_board._choose_transfer_protocol('다운로드')
+                if protocol == 'x':
+                    file_board.download_file(post['attachment'])
+                elif protocol == 'z':
+                    file_board.zmodem_download(post['attachment'])
             else:
                 beep()
                 rawprint(C_ERR + "잘못된 명령입니다.\n" + RESET)
@@ -143,6 +216,10 @@ def write_post(username, board_id):
     rawprint(C_DIM + "내용을 입력하세요. 한 줄에 '.' 만 입력하면 종료됩니다.\n" + RESET)
     content = multiline_input('')
 
+    rawprint('\n')
+    attach_choice = rawinput(C_TITLE + "첨부파일을 업로드하시겠습니까? (Y/N): " + RESET).strip().upper()
+    attachment = _upload_attachment() if attach_choice == 'Y' else None
+
     # 게시판별로 걸러낸 목록이 아니라 항상 전체 글 목록을 불러와서 그
     # 위에 이어붙여야 한다 - 필터링된 목록을 그대로 저장하면 다른
     # 게시판의 글이 전부 사라지는 버그가 있었다.
@@ -154,7 +231,8 @@ def write_post(username, board_id):
         'author': username,
         'title': title,
         'content': content,
-        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'attachment': attachment,
     }
     all_posts.append(post)
     save_posts(all_posts)

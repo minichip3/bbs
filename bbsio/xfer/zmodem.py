@@ -46,6 +46,13 @@ ZCRCQ = 0x6A  # 'j' - 서브패킷 끝, ZACK 요청하지만 프레임은 계속
 ZCRCW = 0x6B  # 'k' - 서브패킷 끝, ZACK 요청 + 프레임 종료
 _SUBPACKET_ENDS = (ZCRCE, ZCRCG, ZCRCQ, ZCRCW)
 
+# 실제 rz(1)가 사람이 보는 배너로 출력하는 문구를 흉내낸 레거시 자동인식
+# 트리거. SecureCRT 등 일부 터미널은 스트림에서 이 문자열을 보자마자(뒤에
+# 오는 바이너리와 무관하게) ZMODEM 수신 다이얼로그를 띄운다 - 오래된 BBS
+# 클라이언트 호환을 위해 통신 맨 앞에 한 번 내보낸다. 실제 핸드셰이크는
+# 이 배너와 무관하게 뒤이어 전송되는 진짜 ZRINIT 헤더가 담당한다.
+ZMODEM_AUTOSTART_BANNER = b'rz waiting to receive...' + b'\x1b\x5a'
+
 ZRQINIT = 0
 ZRINIT = 1
 ZACK = 3
@@ -480,6 +487,8 @@ class ZModemReceiver:
         반환한다. progress_cb(received_bytes, total_bytes)가 있으면 블록마다
         호출한다."""
         transport.flush_input()
+        # 통신 맨 처음에 터미널 자동인식용 배너를 한 번 내보낸다(위 상수 설명 참고).
+        transport.write_bytes(ZMODEM_AUTOSTART_BANNER)
         try:
             return self._receive_inner(progress_cb)
         except ZModemError:

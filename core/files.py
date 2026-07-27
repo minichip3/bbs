@@ -118,7 +118,7 @@ def file_board_menu(username, board):
                             f"{entry['uploader']:<12} {entry['date']}{RESET}")
                     box_line(line, width)
             box_bottom(width)
-            draw_footer("[번호:정보] [U:업로드] [G:다운로드] [F:다음] [B:이전] [P:뒤로]", width)
+            draw_footer("[번호:정보] [U:업로드] [F:다음] [B:이전] [P:뒤로]", width)
 
             cmd = command_input(C_TITLE + " > " + RESET).strip().lower()
 
@@ -130,22 +130,6 @@ def file_board_menu(username, board):
                     upload_file(username)
                 elif protocol == 'z':
                     zmodem_upload(username)
-            elif cmd == 'g':
-                sel_str = rawinput(C_TITLE + "받을 자료 번호: " + RESET).strip()
-                try:
-                    sel = int(sel_str)
-                    if 1 <= sel <= len(entries):
-                        protocol = _choose_transfer_protocol('다운로드')
-                        if protocol == 'x':
-                            download_file(entries[sel - 1])
-                        elif protocol == 'z':
-                            zmodem_download(entries[sel - 1])
-                    else:
-                        rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
-                        rawinput("계속하려면 Enter를 누르세요.\n")
-                except ValueError:
-                    rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
-                    rawinput("계속하려면 Enter를 누르세요.\n")
             elif cmd in ('', 'f') and end < len(entries):
                 page += 1
             elif cmd == 'b' and page > 0:
