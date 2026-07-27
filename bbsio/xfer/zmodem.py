@@ -51,7 +51,7 @@ _SUBPACKET_ENDS = (ZCRCE, ZCRCG, ZCRCQ, ZCRCW)
 # 오는 바이너리와 무관하게) ZMODEM 수신 다이얼로그를 띄운다 - 오래된 BBS
 # 클라이언트 호환을 위해 통신 맨 앞에 한 번 내보낸다. 실제 핸드셰이크는
 # 이 배너와 무관하게 뒤이어 전송되는 진짜 ZRINIT 헤더가 담당한다.
-ZMODEM_AUTOSTART_BANNER = b'rz waiting to receive...' + b'\x1b\x5a'
+ZMODEM_AUTOSTART_BANNER = b'rz waiting to receive... \x1b\x5a'
 
 ZRQINIT = 0
 ZRINIT = 1
