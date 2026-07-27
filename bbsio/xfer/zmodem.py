@@ -55,6 +55,7 @@ ZMODEM_AUTOSTART_BANNER = b'rz waiting to receive.' + b'\x1b\x5a'
 
 ZRQINIT = 0
 ZRINIT = 1
+ZSINIT = 2
 ZACK = 3
 ZFILE = 4
 ZSKIP = 5
@@ -528,6 +529,20 @@ class ZModemReceiver:
                 break
             if ftype == ZRQINIT:
                 self._send_rinit()
+                continue
+            if ftype == ZSINIT:
+                # 일부 sz(lrzsz 등)는 ZRINIT 응답 뒤 ZFILE 전에 ZSINIT(attention
+                # string) 프레임을 먼저 보낸다. 데이터 서브패킷(빈 attn 문자열
+                # 포함)이 뒤따르므로 반드시 읽어서 스트림에서 제거해야 다음
+                # 헤더 스캔이 그 잔여 바이트를 잡음으로 오인하지 않는다.
+                # ZACK으로 응답하지 않으면 송신측은 확인을 못 받았다고 보고
+                # 계속 재전송하며 ZFILE로 못 넘어가 업로드가 영원히 멈춘다
+                # (실제 배포에서 관찰된 무한 대기 원인).
+                try:
+                    _read_data_subpacket(self.timeout, max_len=META_MAX_BYTES)
+                except (transport.TransportTimeout, _GarbledHeader):
+                    pass
+                transport.write_bytes(_build_hex_header(ZACK))
                 continue
         else:
             raise ZModemTimeout('송신측이 응답하지 않습니다 (파일 전송 시작 대기 시간 초과).')

@@ -71,6 +71,18 @@ _IAC_COMMANDS = (WILL, WONT, DO, DONT)
 # 매 협상을 그 자리에서 종료시킨다 - 재요청이나 서브협상이 이어질 여지를 없앤다.
 _IAC_DECLINE = {WILL: DONT, WONT: DONT, DO: WONT, DONT: WONT}
 
+# ECHO/SGA는 예외다 - 접속 시작 시 우리가 이미 NEGOTIATION으로 먼저
+# 제안했으므로(WILL ECHO, WILL SGA, DO SGA), 그 뒤에 들어오는 ECHO/SGA
+# 관련 WILL/WONT/DO/DONT는 새 요청이 아니라 그 제안에 대한 클라이언트의
+# 응답(ack/nak)이다. 여기에 다시 _IAC_DECLINE으로 거부 응답을 보내면
+# 우리가 방금 제안한 걸 스스로 거부하는 꼴이 되어(예: 클라이언트가 우리
+# WILL ECHO에 DO ECHO로 동의했는데 우리가 다시 DONT ECHO를 보내면) 클라이언트가
+# 서버 에코를 취소하고 로컬 에코를 다시 켜버린다 - 비밀번호 입력 화면에서
+# '*' 마스킹 대신 평문이 그대로 로컬 에코되어 보이는 버그의 원인이었다.
+# 이미 우리가 협상을 시작한 옵션에 대한 응답에는 답장하지 않는다(RFC 854가
+# 금지하는 "응답에 대한 재응답" 루프를 피하기 위함이기도 하다).
+_IAC_NO_REPLY_OPTIONS = (TELOPT_ECHO, TELOPT_SGA)
+
 
 def strip_telnet_iac(data):
     # 소켓으로 들어오는 바이트 중 telnet IAC 명령 시퀀스(IAC+WILL/WONT/DO/DONT+옵션,
@@ -104,8 +116,11 @@ def strip_telnet_iac(data):
                 # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고
                 # bbs.py로 넘어가는 스트림에서는 스킵하되, 클라이언트에게
                 # RFC 854에 맞는 짝(_IAC_DECLINE)으로 거부 응답을 돌려준다.
+                # 단, ECHO/SGA는 우리가 먼저 제안한 옵션이라 그에 대한 응답에는
+                # 답장하지 않는다(_IAC_NO_REPLY_OPTIONS 설명 참고).
                 option = data[i + 2]
-                responses.extend([IAC, _IAC_DECLINE[data[i + 1]], option])
+                if option not in _IAC_NO_REPLY_OPTIONS:
+                    responses.extend([IAC, _IAC_DECLINE[data[i + 1]], option])
                 i += 3
                 continue
             if i + 1 >= n:
