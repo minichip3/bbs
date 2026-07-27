@@ -76,6 +76,21 @@ def _log(msg):
     print(f'[files] {msg}', file=sys.stderr)
 
 
+def _choose_transfer_protocol(action_label):
+    """업로드/다운로드 공통 프로토콜 서브메뉴. 'x'/'z'/None(취소)을 반환."""
+    rawprint('\n')
+    rawprint(C_TITLE + f"{action_label} 방식을 선택하세요.\n" + RESET)
+    rawprint(C_TEXT + "[1] XModem   [2] ZModem\n" + RESET)
+    sel = rawinput(C_TITLE + " > " + RESET).strip()
+    if sel == '1':
+        return 'x'
+    elif sel == '2':
+        return 'z'
+    rawprint(C_ERR + "잘못된 선택입니다.\n" + RESET)
+    rawinput("계속하려면 Enter를 누르세요.\n")
+    return None
+
+
 def file_board_menu(username, board):
     page = 0
     while True:
@@ -103,22 +118,28 @@ def file_board_menu(username, board):
                             f"{entry['uploader']:<12} {entry['date']}{RESET}")
                     box_line(line, width)
             box_bottom(width)
-            draw_footer("[번호:정보/받기] [U:올리기] [Z:Z업로드] [G:Z받기] [F:다음] [B:이전] [P:뒤로]", width)
+            draw_footer("[번호:정보] [U:업로드] [G:다운로드] [F:다음] [B:이전] [P:뒤로]", width)
 
             cmd = command_input(C_TITLE + " > " + RESET).strip().lower()
 
             if cmd == 'p':
                 break
             elif cmd == 'u':
-                upload_file(username)
-            elif cmd == 'z':
-                zmodem_upload(username)
+                protocol = _choose_transfer_protocol('업로드')
+                if protocol == 'x':
+                    upload_file(username)
+                elif protocol == 'z':
+                    zmodem_upload(username)
             elif cmd == 'g':
                 sel_str = rawinput(C_TITLE + "받을 자료 번호: " + RESET).strip()
                 try:
                     sel = int(sel_str)
                     if 1 <= sel <= len(entries):
-                        zmodem_download(entries[sel - 1])
+                        protocol = _choose_transfer_protocol('다운로드')
+                        if protocol == 'x':
+                            download_file(entries[sel - 1])
+                        elif protocol == 'z':
+                            zmodem_download(entries[sel - 1])
                     else:
                         rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
                         rawinput("계속하려면 Enter를 누르세요.\n")
@@ -172,7 +193,11 @@ def file_info_menu(username, entry):
             if cmd == 'p':
                 break
             elif cmd == 'g':
-                download_file(entry)
+                protocol = _choose_transfer_protocol('다운로드')
+                if protocol == 'x':
+                    download_file(entry)
+                elif protocol == 'z':
+                    zmodem_download(entry)
             elif cmd == 'dd':
                 if not _can_manage(username, entry):
                     rawprint(C_ERR + "본인이 올린 자료만 삭제할 수 있습니다.\n" + RESET)

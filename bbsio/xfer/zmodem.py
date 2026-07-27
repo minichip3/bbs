@@ -34,6 +34,17 @@ FRAME_END = 0x45   # 'E' - 전송 종료(XModem의 EOT에 해당)
 HELLO_RECV = b'rz\r'  # 수신측이 보내는 시작 시퀀스("receive zmodem")
 HELLO_SEND = b'sz\r'  # 핸드셰이크 성사 후 송신측이 화답하는 시퀀스("send zmodem")
 
+# 아래 두 트리거는 바이너리 핸드셰이크(HELLO_RECV/HELLO_SEND)와는 별개로, 세션
+# 스트림을 지켜보는 클라이언트(터미널 프로그램)가 사람이 굳이 메뉴를 조작하지
+# 않아도 텍스트 패턴만 보고 자동으로 rz/sz를 실행할 수 있게 하기 위한
+# 신호다. ESC Z(\x1b\x5a)로 끝나는 것도 자동 인식을 돕기 위함이다.
+AUTO_TRIGGER_RECV = b'rz waiting to receive... \x1b\x5a'
+
+
+def _auto_trigger_send(filename, size):
+    """다운로드 시작 시 클라이언트가 자동으로 알아볼 수 있는 헤더 텍스트."""
+    return f'sz {filename} {size}\r\n'.encode('utf-8')
+
 DEFAULT_RETRY = 10
 DEFAULT_TIMEOUT = 10  # 초 - 상대 응답 대기 시간 (전화 접속 등 느린 회선 고려)
 DEFAULT_BLOCK_SIZE = 1024
@@ -115,6 +126,9 @@ class ZModemSender:
         progress_cb(sent_bytes, total_bytes)가 있으면 매 블록마다 호출한다.
         성공하면 True, 취소/시간초과면 예외를 던진다."""
         transport.flush_input()
+        # 자동 트리거: 클라이언트가 rz를 수동으로 띄우지 않아도 이 텍스트를
+        # 보고 파일명/크기를 인지해 자동으로 수신을 시작할 수 있게 한다.
+        transport.write_bytes(_auto_trigger_send(filename, len(data)))
         _wait_for_token(HELLO_RECV, self.retry, self.timeout)
         transport.write_bytes(HELLO_SEND)
 
@@ -219,6 +233,9 @@ class ZModemReceiver:
         """송신측으로부터 ZMODEM(Lite)으로 파일을 받아 (filename, data)를 반환한다.
         progress_cb(received_bytes, total_bytes)가 있으면 블록마다 호출한다."""
         transport.flush_input()
+        # 자동 트리거: 클라이언트가 rz를 수동으로 띄우지 않아도 이 텍스트를
+        # 보고 자동으로 sz(업로드)를 시작할 수 있게 한다.
+        transport.write_bytes(AUTO_TRIGGER_RECV)
 
         header = self._start_and_get_first_header()
         ok, _, meta_payload = self._read_frame_rest(header)
