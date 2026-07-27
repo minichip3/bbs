@@ -2,7 +2,7 @@
 BBS 최적화 서브셋 구현.
 
 이전 버전은 자체 프레임 포맷(ZModemSender/Receiver끼리만 통신 가능)을 쓰고,
-클라이언트 자동 인식을 위해 `b'rz waiting to receive... \\x1b\\x5a'` 같은
+클라이언트 자동 인식을 위해 `b'rz waiting to receive.\\x1b\\x5a'` 같은
 임의의 텍스트 문자열을 내보냈다. 하지만 SecureCRT/lrzsz/미니콤 등 실제
 터미널 프로그램은 그런 커스텀 문자열이 아니라, 스트림에 실려 오는 *진짜*
 ZMODEM 헤더 바이트열(`**\\x18B...`)을 직접 감지해서 업/다운로드 대화상자를
@@ -51,7 +51,7 @@ _SUBPACKET_ENDS = (ZCRCE, ZCRCG, ZCRCQ, ZCRCW)
 # 오는 바이너리와 무관하게) ZMODEM 수신 다이얼로그를 띄운다 - 오래된 BBS
 # 클라이언트 호환을 위해 통신 맨 앞에 한 번 내보낸다. 실제 핸드셰이크는
 # 이 배너와 무관하게 뒤이어 전송되는 진짜 ZRINIT 헤더가 담당한다.
-ZMODEM_AUTOSTART_BANNER = b'rz waiting to receive... \x1b\x5a'
+ZMODEM_AUTOSTART_BANNER = b'rz waiting to receive.' + b'\x1b\x5a'
 
 ZRQINIT = 0
 ZRINIT = 1
