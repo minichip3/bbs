@@ -74,7 +74,15 @@ def strip_telnet_iac(data):
     # 3바이트를 스킵해야 한다. 그렇지 않으면 XModem 등 바이너리 전송 중에 등장하는
     # 리터럴 0xFF 데이터 바이트(체크섬, CRC, 블록 번호 등)를 커맨드로 오인해서
     # 뒤따르는 진짜 데이터 2바이트까지 함께 먹어버려 전송이 깨진다.
+    #
+    # 커맨드를 그냥 버리기만 하면 클라이언트는 자기가 보낸 WILL/DO에 대한 응답을
+    # 영영 못 받아서(예: 일부 클라이언트가 협상이 안 끝났다고 보고) 60초마다
+    # 재접속을 시도하다가 결국 서버 rate limiter에 걸리는 문제가 있었다.
+    # 그래서 커맨드를 스킵하는 대신, 옵션별로 IAC DO <옵션>을 응답으로 만들어
+    # 별도로 반환한다 - 완전한 협상 상태머신은 아니지만 클라이언트가 "확인받았다"고
+    # 인식하기엔 충분함.
     out = bytearray()
+    responses = bytearray()
     i = 0
     n = len(data)
     while i < n:
@@ -85,7 +93,11 @@ def strip_telnet_iac(data):
                 i += 2
                 continue
             if i + 2 < n and data[i + 1] in _IAC_COMMANDS:
-                # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고 스킵.
+                # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고
+                # bbs.py로 넘어가는 스트림에서는 스킵하되, 클라이언트에게
+                # IAC DO <옵션>을 ACK로 돌려준다.
+                option = data[i + 2]
+                responses.extend([IAC, DO, option])
                 i += 3
                 continue
             if i + 1 >= n:
@@ -102,7 +114,7 @@ def strip_telnet_iac(data):
             continue
         out.append(b)
         i += 1
-    return bytes(out)
+    return bytes(out), bytes(responses)
 
 
 def log_bbs_stderr(proc, tag):
@@ -143,7 +155,12 @@ def data_relay(conn, master_fd, proc, tag, ip):
                     except Exception:
                         pass
                     return
-                filtered = strip_telnet_iac(data)
+                filtered, iac_responses = strip_telnet_iac(data)
+                if iac_responses:
+                    # 클라이언트가 보낸 IAC 협상 커맨드에 대한 ACK(IAC DO <옵션>).
+                    # 이걸 안 보내면 클라이언트가 협상 미완료로 보고 60초마다
+                    # 재접속을 시도하다 rate limiter에 걸리는 문제가 있었다.
+                    conn.sendall(iac_responses)
                 if filtered:
                     now = time.time()
                     gap_ms = (now - last_recv_time[0]) * 1000
