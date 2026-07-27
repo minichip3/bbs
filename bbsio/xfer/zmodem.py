@@ -73,7 +73,12 @@ _ESCAPE_NEEDED = frozenset({0x18, 0x0D, 0x8D, 0x10, 0x90, 0x11, 0x91, 0x13, 0x93
 
 DEFAULT_RETRY = 10
 DEFAULT_TIMEOUT = 10  # 초 - 상대 응답 대기 시간 (전화 접속 등 느린 회선 고려)
-DEFAULT_BLOCK_SIZE = 1024
+# 1024는 원래 300~9600bps 전화접속 시절의 한계치다. 오늘날 회선/터미널에서는
+# 블록마다 발생하는 stop-and-wait 왕복(ZDATA -> ZACK)이 처리량을 좌우하므로,
+# 블록을 키워 같은 데이터에 필요한 왕복 횟수 자체를 줄인다. 8KB는 lrzsz/
+# SecureCRT 등 실제 ZMODEM 구현체가 흔히 쓰는 서브패킷 크기라 상호운용성도
+# 안전하다(CRC16은 페이로드 길이에 무관하므로 무결성에 영향 없음).
+DEFAULT_BLOCK_SIZE = 8192
 META_MAX_BYTES = 8192  # ZFILE 메타데이터 서브패킷의 상한(잡음/오동작 대비 방어적 한도)
 
 
@@ -384,8 +389,12 @@ class ZModemSender:
         zfile_payload = _build_zfile_payload(filename, total)
 
         def _send_zfile():
-            transport.write_bytes(_flag_header(ZFILE, zf0=ZCBIN))
-            transport.write_bytes(_build_data_subpacket(zfile_payload, ZCRCW))
+            # 헤더와 서브패킷을 한 번의 write_bytes 호출로 합쳐서 보낸다 -
+            # write 시스템콜/TCP 세그먼트 수를 줄여 상대가 헤더 뒤에 곧바로
+            # 이어지는 데이터를 기다리는 시간을 최소화한다.
+            transport.write_bytes(
+                _flag_header(ZFILE, zf0=ZCBIN) + _build_data_subpacket(zfile_payload, ZCRCW)
+            )
 
         _send_zfile()
         start_pos = 0
@@ -418,8 +427,10 @@ class ZModemSender:
             acked = False
             next_sent = None
             for _ in range(self.retry):
-                transport.write_bytes(_pos_header(ZDATA, sent))
-                transport.write_bytes(packet)
+                # ZDATA 헤더 + 서브패킷을 한 번에 write - 두 번의 write
+                # 시스템콜로 쪼개면 수신측이 헤더를 먼저 읽고 나서 이어지는
+                # 데이터를 다시 기다리는 불필요한 지연이 생길 수 있다.
+                transport.write_bytes(_pos_header(ZDATA, sent) + packet)
                 try:
                     ftype, b1, b2, b3, b4 = _read_header(self.retry, self.timeout)
                 except (transport.TransportTimeout, ZModemTimeout, _GarbledHeader):

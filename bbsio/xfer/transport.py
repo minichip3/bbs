@@ -36,38 +36,63 @@ def _out_fd():
     return sys.stdout.fileno()
 
 
-def read_byte(timeout):
-    """1바이트를 기다린다. timeout초 안에 안 오면 TransportTimeout."""
+# ZModem 블록이 커진 뒤로는(수 KB) 바이트 하나마다 select()+os.read()를 왕복하는
+# 방식 자체가 실제 회선 지연보다 더 큰 오버헤드였다 - 헤더 스캔이나 서브패킷
+# 파싱은 전부 read_byte()를 바이트 단위로 반복 호출한다(zmodem.py 참고). 커널이
+# 이미 들고 있는 만큼을 한 번에 끌어와 로컬 버퍼에 쌓아두고, 그 다음부터는
+# 버퍼가 다 소진될 때까지 이 캐시에서 서빙한다 - 도착한 바이트 수만큼 select+
+# read를 반복하는 대신 버퍼가 빌 때만 다시 커널을 호출한다.
+_READ_CHUNK = 65536
+
+_rx_buf = b''
+_rx_pos = 0
+
+
+def _fill(timeout):
+    """로컬 버퍼가 비었을 때 커널로부터 최대 _READ_CHUNK바이트를 채운다."""
+    global _rx_buf, _rx_pos
     fd = _in_fd()
     ready, _, _ = select.select([fd], [], [], timeout)
     if not ready:
         raise TransportTimeout(f'{timeout}초간 응답 없음')
-    data = os.read(fd, 1)
-    if not data:
+    chunk = os.read(fd, _READ_CHUNK)
+    if not chunk:
         raise TransportClosed('입력 스트림 종료(EOF)')
-    return data[0]
+    _rx_buf = chunk
+    _rx_pos = 0
+
+
+def read_byte(timeout):
+    """1바이트를 기다린다. timeout초 안에 안 오면 TransportTimeout."""
+    global _rx_pos
+    if _rx_pos >= len(_rx_buf):
+        _fill(timeout)
+    b = _rx_buf[_rx_pos]
+    _rx_pos += 1
+    return b
 
 
 def read_exact(n, timeout):
     """정확히 n바이트를 모을 때까지 읽는다. 바이트 사이 간격에도 timeout이 적용된다
     (블록 전송 도중 상대가 멈추면 끝없이 블로킹하지 않도록)."""
-    fd = _in_fd()
+    global _rx_pos
     buf = bytearray()
     while len(buf) < n:
-        ready, _, _ = select.select([fd], [], [], timeout)
-        if not ready:
-            raise TransportTimeout(f'{timeout}초간 응답 없음 ({len(buf)}/{n}바이트 수신)')
-        chunk = os.read(fd, n - len(buf))
-        if not chunk:
-            raise TransportClosed('입력 스트림 종료(EOF)')
-        buf += chunk
+        if _rx_pos >= len(_rx_buf):
+            _fill(timeout)
+        take = min(n - len(buf), len(_rx_buf) - _rx_pos)
+        buf += _rx_buf[_rx_pos:_rx_pos + take]
+        _rx_pos += take
     return bytes(buf)
 
 
 def flush_input(settle=0.1):
-    """입력 버퍼에 남아있는 잡음성 바이트를 모두 비운다. 프로토콜 시작 전이나
-    취소 직후처럼 "다음에 오는 바이트가 확실히 새 시퀀스의 시작"이어야 하는
-    지점에서만 호출해야 한다."""
+    """입력 버퍼(로컬 캐시 + 커널 소켓 버퍼)에 남아있는 잡음성 바이트를 모두
+    비운다. 프로토콜 시작 전이나 취소 직후처럼 "다음에 오는 바이트가 확실히
+    새 시퀀스의 시작"이어야 하는 지점에서만 호출해야 한다."""
+    global _rx_buf, _rx_pos
+    _rx_buf = b''
+    _rx_pos = 0
     fd = _in_fd()
     while True:
         ready, _, _ = select.select([fd], [], [], settle)
