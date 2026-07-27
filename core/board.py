@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from bbsio.rawio import rawprint, rawinput, command_input, multiline_input
+from bbsio.rawio import rawprint, rawinput, command_input, multiline_input, beep
 from bbsio.tui import (
     C_BORDER, C_TITLE, C_TEXT, C_DIM, C_OK, C_ERR, C_HILITE, RESET,
     clear_screen, hline, pad, draw_top_bar, draw_footer,
@@ -128,6 +128,7 @@ def view_post(post, username):
             elif cmd == 'p':
                 break
             else:
+                beep()
                 rawprint(C_ERR + "잘못된 명령입니다.\n" + RESET)
         except KeyboardInterrupt:
             break
@@ -216,8 +217,8 @@ def main_menu(username):
 
         if board is None:
             if choice:
+                beep()
                 rawprint(C_ERR + "잘못된 선택입니다.\n" + RESET)
-                rawinput("계속하려면 Enter를 누르세요.")
             continue
 
         board_id = board['id']
@@ -295,10 +296,10 @@ def board_menu(username, board, posts):
                         view_post(posts[sel - 1], username)
                         posts = [p for p in load_posts() if p.get('board') == board['id']]
                     else:
+                        beep()
                         rawprint(C_ERR + "잘못된 번호입니다.\n" + RESET)
-                        rawinput("계속하려면 Enter를 누르세요.\n")
                 except ValueError:
+                    beep()
                     rawprint(C_ERR + "잘못된 명령입니다.\n" + RESET)
-                    rawinput("계속하려면 Enter를 누르세요.\n")
         except KeyboardInterrupt:
             break

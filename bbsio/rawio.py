@@ -83,6 +83,15 @@ def flush_input():
     except termios.error:
         pass
 
+def beep():
+    """터미널 벨(BEL, \\x07)을 울린다. 잘못된 명령 등 사용자에게 즉시
+    피드백을 줘야 하는 상황에 rawprint 대신/함께 쓴다."""
+    try:
+        sys.stdout.buffer.write(b'\x07')
+        sys.stdout.buffer.flush()
+    except Exception:
+        pass
+
 def rawprint(text: str, encoding=None):
     if encoding is None:
         encoding = current_encoding
