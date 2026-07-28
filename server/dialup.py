@@ -27,7 +27,11 @@ MODEM_INIT_COMMANDS = [
     b'ATZ\r',       # 리셋
     b'ATE0\r',      # 에코 끄기
     b'ATQ0\r',      # 결과 코드(OK 등) 활성화
-    b'AT+MS=V32\r', # V.32bis 14400bps 최종 확정 (V.34/26400은 재훈련 잦고 불안정해서 제외)
+    b'AT+MS=V21\r', # V.21/Bell103 300bps 고정 (위 설명 참고 - 이 VoIP 경로에서
+                    # V.32bis(14400)로 협상을 시도하면 거의 항상 핸드셰이크
+                    # 자체가 실패해 CONNECT를 못 받고 CONNECT_TIMEOUT까지
+                    # 대기하다 끊김. 실제 배포에서 RING마다 40초 뒤
+                    # "CONNECT 실패"만 반복되던 원인)
     b'AT&K0\r',     # 데이터 압축 끔 (K는 흐름제어 아님, USR 공식 레퍼런스로 확인됨)
     b'AT&H1\r',     # TX 하드웨어 흐름제어(CTS) 진짜 명령으로 재시도
     b'AT&R2\r',     # RX 하드웨어 흐름제어(RTS)도 같이 활성화
@@ -133,6 +137,12 @@ def modem_handler():
                         log(f'[{MODEM_PORT}] {line}')
                         connect_received = True
                         break
+                    elif line:
+                        # CONNECT가 아닌 응답(협상 재시도/에러 코드 등)도 남겨야
+                        # CONNECT 실패 원인을 나중에 로그로 추적할 수 있다.
+                        # 예전엔 여기서 아무것도 안 남겨서 "CONNECT 실패"만
+                        # 보이고 그 사이 모뎀이 뭘 시도했는지 알 방법이 없었음.
+                        log_verbose(f'[{MODEM_PORT}] CONNECT 대기 중 응답: {line}')
                     time.sleep(0.1)
 
                 if serial_broke_mid_wait:
