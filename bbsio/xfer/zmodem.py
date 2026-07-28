@@ -555,7 +555,15 @@ class ZModemReceiver:
         호출한다."""
         transport.flush_input()
         # 통신 맨 처음에 터미널 자동인식용 배너를 한 번 내보낸다(위 상수 설명 참고).
-        transport.write_bytes(ZMODEM_AUTOSTART_BANNER)
+        # 실 배포(전화 모뎀 회선)에서 배너의 첫 바이트가 간간이 유실되는 현상이
+        # 관찰됨 (예: "rz waiting..."이 "z waiting..."으로 표시). 사용자가
+        # Enter를 누르길 기다리는 동안 회선이 한동안 조용했다가 이 배너가 그
+        # 침묵 뒤 첫 버스트로 나가는데, 어느 계층(모뎀 UART, VoIP 구간의 무음
+        # 감지 등)에서 씹히는지는 특정하지 못했다. 배너는 순전히 구식 터미널
+        # 자동인식용 장식이라(실제 핸드셰이크는 뒤이어 나가는 ZRINIT/ZFILE
+        # 헤더가 담당) 한 바이트 손실돼도 기능엔 영향 없지만, 사람이 보기엔
+        # 어색하므로 희생돼도 되는 CR 한 바이트를 진짜 배너 앞에 붙여 흡수한다.
+        transport.write_bytes(b'\r' + ZMODEM_AUTOSTART_BANNER)
         try:
             return self._receive_inner(progress_cb)
         except ZModemError:

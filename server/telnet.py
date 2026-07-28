@@ -63,10 +63,20 @@ def is_rate_limited(ip):
 
 # 접속 직후 텔넷 협상이 오가는 시간대에만 IAC 커맨드를 해석한다(아래
 # strip_telnet_iac 사용처 및 주의사항 참고) - 그 뒤로는 순수 데이터로
-# 취급해 그대로 통과시킨다. 로그인/메뉴 탐색을 거쳐 ZMODEM/XMODEM 같은
-# 바이너리 전송을 시작하기까지는 최소 수십 초가 걸리므로, 실제 협상이
-# 다 끝나고도 한참 남는 여유 있는 값이다.
-IAC_NEGOTIATION_WINDOW_SEC = 10
+# 취급해 그대로 통과시킨다.
+# 예전엔 "접속 후 10초"라는 고정 시간창으로 판단했는데, 실제로는 로그인 +
+# 메뉴 탐색 + 파일 선택까지가 10초 안에 끝나는 경우(익숙한 사용자, 반복
+# 테스트 등)가 흔해서 그 안에 ZMODEM 바이너리 전송이 시작되면 여전히
+# 헤더 바이트를 텔넷 커맨드로 오인하는 위험이 있었다(아래 strip_telnet_iac
+# 주석의 "완전히 안전하지 않다" 항목 참고 - 실제로 재현된 버그).
+# 진짜 협상 커맨드는 우리가 접속 시 보낸 NEGOTIATION에 대한 응답으로만
+# 오고, 그 응답은 클라이언트가 접속 직후 첫 패킷(들)에 몰아서 보낸다 -
+# 그래서 시간 대신 "첫 데이터 청크가 도착한 뒤 잠깐(NEGOTIATION_SETTLE_SEC)
+# 만 더 기다렸다가 닫는" 이벤트 기반으로 바꿔서, 패킷이 쪼개져 오는 드문
+# 경우도 커버하면서 위험 구간을 최대한 좁힌다. 데이터가 아예 늦게 오는
+# 경우를 위한 상한선(IAC_NEGOTIATION_CEILING_SEC)만 안전망으로 남겨둔다.
+NEGOTIATION_SETTLE_SEC = 0.5
+IAC_NEGOTIATION_CEILING_SEC = 3
 
 _IAC_COMMANDS = (WILL, WONT, DO, DONT)
 
@@ -180,7 +190,8 @@ def data_relay(conn, master_fd, proc, tag, ip):
     disconnect_event = threading.Event()
     last_recv_time = [time.time()]
     last_send_time = [time.time()]
-    iac_negotiation_deadline = time.time() + IAC_NEGOTIATION_WINDOW_SEC
+    iac_negotiation_deadline = [time.time() + IAC_NEGOTIATION_CEILING_SEC]
+    first_chunk_seen = [False]
 
     # 소켓 -> PTY 방향 (텔넷 클라이언트가 보낸 키 입력)
     def relay_socket_to_pty():
@@ -199,8 +210,14 @@ def data_relay(conn, master_fd, proc, tag, ip):
                     except Exception:
                         pass
                     return
-                if time.time() < iac_negotiation_deadline:
+                if time.time() < iac_negotiation_deadline[0]:
                     filtered, iac_responses = strip_telnet_iac(data)
+                    if not first_chunk_seen[0]:
+                        first_chunk_seen[0] = True
+                        iac_negotiation_deadline[0] = min(
+                            iac_negotiation_deadline[0],
+                            time.time() + NEGOTIATION_SETTLE_SEC
+                        )
                 else:
                     # 협상 시간대가 지났다 - ZMODEM/XMODEM 같은 바이너리 전송이
                     # 시작됐을 수 있으므로 더 이상 IAC 커맨드로 해석하지 않고
