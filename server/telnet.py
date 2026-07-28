@@ -61,6 +61,23 @@ def is_rate_limited(ip):
     return False
 
 
+# 접속 직후 텔넷 협상이 오가는 시간대에만 IAC 커맨드를 해석한다(아래
+# strip_telnet_iac 사용처 및 주의사항 참고) - 그 뒤로는 순수 데이터로
+# 취급해 그대로 통과시킨다.
+# 예전엔 "접속 후 10초"라는 고정 시간창으로 판단했는데, 실제로는 로그인 +
+# 메뉴 탐색 + 파일 선택까지가 10초 안에 끝나는 경우(익숙한 사용자, 반복
+# 테스트 등)가 흔해서 그 안에 ZMODEM 바이너리 전송이 시작되면 여전히
+# 헤더 바이트를 텔넷 커맨드로 오인하는 위험이 있었다(아래 strip_telnet_iac
+# 주석의 "완전히 안전하지 않다" 항목 참고 - 실제로 재현된 버그).
+# 진짜 협상 커맨드는 우리가 접속 시 보낸 NEGOTIATION에 대한 응답으로만
+# 오고, 그 응답은 클라이언트가 접속 직후 첫 패킷(들)에 몰아서 보낸다 -
+# 그래서 시간 대신 "첫 데이터 청크가 도착한 뒤 잠깐(NEGOTIATION_SETTLE_SEC)
+# 만 더 기다렸다가 닫는" 이벤트 기반으로 바꿔서, 패킷이 쪼개져 오는 드문
+# 경우도 커버하면서 위험 구간을 최대한 좁힌다. 데이터가 아예 늦게 오는
+# 경우를 위한 상한선(IAC_NEGOTIATION_CEILING_SEC)만 안전망으로 남겨둔다.
+NEGOTIATION_SETTLE_SEC = 0.5
+IAC_NEGOTIATION_CEILING_SEC = 3
+
 _IAC_COMMANDS = (WILL, WONT, DO, DONT)
 
 # 클라이언트가 보낸 협상 커맨드에 대한 응답 매핑. RFC 854상 유효한 짝만 써야 한다 -
@@ -70,6 +87,18 @@ _IAC_COMMANDS = (WILL, WONT, DO, DONT)
 # 옵션별 동작을 구현하지 않으므로(완전한 상태머신 아님) 전부 거부(DONT/WONT)로 답해서
 # 매 협상을 그 자리에서 종료시킨다 - 재요청이나 서브협상이 이어질 여지를 없앤다.
 _IAC_DECLINE = {WILL: DONT, WONT: DONT, DO: WONT, DONT: WONT}
+
+# ECHO/SGA는 예외다 - 접속 시작 시 우리가 이미 NEGOTIATION으로 먼저
+# 제안했으므로(WILL ECHO, WILL SGA, DO SGA), 그 뒤에 들어오는 ECHO/SGA
+# 관련 WILL/WONT/DO/DONT는 새 요청이 아니라 그 제안에 대한 클라이언트의
+# 응답(ack/nak)이다. 여기에 다시 _IAC_DECLINE으로 거부 응답을 보내면
+# 우리가 방금 제안한 걸 스스로 거부하는 꼴이 되어(예: 클라이언트가 우리
+# WILL ECHO에 DO ECHO로 동의했는데 우리가 다시 DONT ECHO를 보내면) 클라이언트가
+# 서버 에코를 취소하고 로컬 에코를 다시 켜버린다 - 비밀번호 입력 화면에서
+# '*' 마스킹 대신 평문이 그대로 로컬 에코되어 보이는 버그의 원인이었다.
+# 이미 우리가 협상을 시작한 옵션에 대한 응답에는 답장하지 않는다(RFC 854가
+# 금지하는 "응답에 대한 재응답" 루프를 피하기 위함이기도 하다).
+_IAC_NO_REPLY_OPTIONS = (TELOPT_ECHO, TELOPT_SGA)
 
 
 def strip_telnet_iac(data):
@@ -89,6 +118,19 @@ def strip_telnet_iac(data):
     # 그래서 커맨드를 스킵하는 대신, RFC 854에 맞는 짝(_IAC_DECLINE)으로 거부
     # 응답을 만들어 별도로 반환한다 - 완전한 협상 상태머신은 아니지만 매 요청을
     # 그 자리에서 종료시켜서 클라이언트가 "응답받았다"고 인식하기엔 충분함.
+    #
+    # 주의: 바로 위의 "0xFF 뒤에 WILL/WONT/DO/DONT가 와야 커맨드로 본다" 가드로도
+    # 완전히 안전하지 않다 - ZMODEM 헤더의 위치/CRC 필드처럼 값 범위 제한이 없는
+    # 바이너리 필드는 이스케이프 대상이 아니라서(_ESCAPE_NEEDED에 0xFB~0xFE가
+    # 없음) 우연히 0xFF 바로 뒤에 0xFB~0xFE 값이 오는 경우가 실제로 발생하고,
+    # 그러면 진짜 파일 데이터 3바이트를 커맨드로 오인해 삼켜버려 헤더 CRC가
+    # 깨지고 전송이 영원히 멈춘다(실제 배포에서 관찰된 ZMODEM 업로드 무한 대기
+    # 원인 - _read_header가 이 손상된 헤더를 CRC 불일치로 계속 거부하면서
+    # ZFILE을 못 받고 송신측 재전송 타임아웃까지 ZRINIT만 반복 전송하게 됨).
+    # 이 함수만으로는 "진짜 협상 커맨드"와 "우연히 같은 패턴의 바이너리 데이터"를
+    # 스트림만 보고 구별할 수 없으므로, 호출부(data_relay)에서 접속 초반
+    # 협상 시간대에만 이 함수를 타게 하고 그 뒤 파일 전송이 벌어질 시점에는
+    # 아예 호출하지 않는 방식(IAC_NEGOTIATION_WINDOW_SEC)으로 막는다.
     out = bytearray()
     responses = bytearray()
     i = 0
@@ -104,8 +146,11 @@ def strip_telnet_iac(data):
                 # WILL/WONT/DO/DONT + 옵션 1바이트 = 총 3바이트 커맨드로 간주하고
                 # bbs.py로 넘어가는 스트림에서는 스킵하되, 클라이언트에게
                 # RFC 854에 맞는 짝(_IAC_DECLINE)으로 거부 응답을 돌려준다.
+                # 단, ECHO/SGA는 우리가 먼저 제안한 옵션이라 그에 대한 응답에는
+                # 답장하지 않는다(_IAC_NO_REPLY_OPTIONS 설명 참고).
                 option = data[i + 2]
-                responses.extend([IAC, _IAC_DECLINE[data[i + 1]], option])
+                if option not in _IAC_NO_REPLY_OPTIONS:
+                    responses.extend([IAC, _IAC_DECLINE[data[i + 1]], option])
                 i += 3
                 continue
             if i + 1 >= n:
@@ -145,6 +190,8 @@ def data_relay(conn, master_fd, proc, tag, ip):
     disconnect_event = threading.Event()
     last_recv_time = [time.time()]
     last_send_time = [time.time()]
+    iac_negotiation_deadline = [time.time() + IAC_NEGOTIATION_CEILING_SEC]
+    first_chunk_seen = [False]
 
     # 소켓 -> PTY 방향 (텔넷 클라이언트가 보낸 키 입력)
     def relay_socket_to_pty():
@@ -163,7 +210,19 @@ def data_relay(conn, master_fd, proc, tag, ip):
                     except Exception:
                         pass
                     return
-                filtered, iac_responses = strip_telnet_iac(data)
+                if time.time() < iac_negotiation_deadline[0]:
+                    filtered, iac_responses = strip_telnet_iac(data)
+                    if not first_chunk_seen[0]:
+                        first_chunk_seen[0] = True
+                        iac_negotiation_deadline[0] = min(
+                            iac_negotiation_deadline[0],
+                            time.time() + NEGOTIATION_SETTLE_SEC
+                        )
+                else:
+                    # 협상 시간대가 지났다 - ZMODEM/XMODEM 같은 바이너리 전송이
+                    # 시작됐을 수 있으므로 더 이상 IAC 커맨드로 해석하지 않고
+                    # 그대로 통과시킨다(위 strip_telnet_iac의 주의사항 참고).
+                    filtered, iac_responses = data, b''
                 if iac_responses:
                     # 클라이언트가 보낸 IAC 협상 커맨드에 대한 ACK(IAC DO <옵션>).
                     # 이걸 안 보내면 클라이언트가 협상 미완료로 보고 60초마다

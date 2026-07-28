@@ -17,8 +17,6 @@ BAUDRATE = 115200                   # 시리얼 통신 속도 (AT&B1로 DTE측 �
 CONNECT_TIMEOUT = 40                 # CONNECT 메시지 대기 시간 (초)
 
 # 모뎀 초기화 AT 명령어 시퀀스.
-# 이 VoIP 경로(아날로그 모뎀 오디오 -> HT802 ATA -> Asterisk)는 고속에서
-# 핸드셰이크가 거의 실패하고, V.21/Bell103 300bps에서만 안정적으로 연결됨.
 # AT&B1이 핵심: 기본값(&B0)은 DTE측 시리얼 속도가 협상된 CONNECT 속도를
 # 따라가며 바뀌는데, pyserial 쪽 포트는 baud가 고정이라 CONNECT 300 이후
 # 실제 통신 속도가 어긋나며 데이터가 깨졌음. &B1로 DTE측 속도를 115200에
@@ -27,7 +25,17 @@ MODEM_INIT_COMMANDS = [
     b'ATZ\r',       # 리셋
     b'ATE0\r',      # 에코 끄기
     b'ATQ0\r',      # 결과 코드(OK 등) 활성화
-    b'AT+MS=V32\r', # V.32bis 14400bps 최종 확정 (V.34/26400은 재훈련 잦고 불안정해서 제외)
+    b'AT+MS=V32\r', # V.32bis 14400bps 고정 - 미니가 V32에서 실제 연결 확인함에
+                    # 따라 요청으로 되돌림(V21로 바꿨던 이전 커밋 09a1353 되돌림).
+                    # 주의: 이 저장소의 이전 조사(PR#11)는 이 VoIP 경로(아날로그
+                    # 모뎀 오디오 -> HT802 ATA -> Asterisk)에서 V32 핸드셰이크가
+                    # 거의 항상 실패한다고 로그 기반으로 결론 내렸었고, 이번 작업
+                    # 직전(오늘) 캡처한 실제 배포 로그도 V21 상태에서 CONNECT 300
+                    # 이후 곧 NO CARRIER로 끊기거나 아예 CONNECT 실패하는 걸 보여줌 -
+                    # 즉 V21이 확실히 안정적이라는 근거도, V32가 지금 된다는 로그
+                    # 근거도 이번 조사에서는 확보하지 못했다. 이 변경은 순수히 미니의
+                    # 지시를 반영한 것이므로, 실제 전화로 CONNECT 성공 여부를 재확인
+                    # 하기 전까지는 회귀 위험이 있다는 점을 알고 배포할 것.
     b'AT&K0\r',     # 데이터 압축 끔 (K는 흐름제어 아님, USR 공식 레퍼런스로 확인됨)
     b'AT&H1\r',     # TX 하드웨어 흐름제어(CTS) 진짜 명령으로 재시도
     b'AT&R2\r',     # RX 하드웨어 흐름제어(RTS)도 같이 활성화
@@ -133,6 +141,12 @@ def modem_handler():
                         log(f'[{MODEM_PORT}] {line}')
                         connect_received = True
                         break
+                    elif line:
+                        # CONNECT가 아닌 응답(협상 재시도/에러 코드 등)도 남겨야
+                        # CONNECT 실패 원인을 나중에 로그로 추적할 수 있다.
+                        # 예전엔 여기서 아무것도 안 남겨서 "CONNECT 실패"만
+                        # 보이고 그 사이 모뎀이 뭘 시도했는지 알 방법이 없었음.
+                        log_verbose(f'[{MODEM_PORT}] CONNECT 대기 중 응답: {line}')
                     time.sleep(0.1)
 
                 if serial_broke_mid_wait:
