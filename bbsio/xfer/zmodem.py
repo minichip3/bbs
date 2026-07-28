@@ -28,6 +28,7 @@ HEX와 BIN(16비트 CRC) 헤더를 모두 해석할 수 있어 실제 sz/rz가 �
 """
 
 import time
+import zlib
 
 from bbsio.xfer import transport
 from bbsio.xfer.crc16 import crc16_ccitt
@@ -38,6 +39,7 @@ ZPAD = 0x2A   # '*' - 헤더 시작 패딩
 ZDLE = 0x18   # Ctrl-X - 이스케이프 문자(ASCII CAN과 동일한 바이트)
 ZBIN = 0x41   # 'A' - 16비트 CRC 바이너리 헤더
 ZHEX = 0x42   # 'B' - 16비트 CRC HEX 헤더
+ZBIN32 = 0x43 # 'C' - 32비트 CRC 바이너리 헤더
 XON = 0x11
 
 ZCRCE = 0x68  # 'h' - 서브패킷 끝, 프레임 종료(뒤에 새 헤더가 옴)
@@ -66,6 +68,7 @@ ZDATA = 10
 ZEOF = 11
 
 CANFDX = 0x01  # ZRINIT 능력 플래그(ZF0): 전이중 통신 가능
+CANFC32 = 0x20 # ZRINIT 능력 플래그(ZF0): 32비트 CRC(ZBIN32) 프레임 수신 가능
 ZCBIN = 0x01   # ZFILE 변환 옵션(ZF0): 바이너리 전송(개행 변환 없음)
 
 # 이스케이프가 필요한 바이트: ZDLE 자신, DLE/XON/XOFF(및 8bit 버전), CR(및 8bit
@@ -220,6 +223,13 @@ def _build_data_subpacket(payload: bytes, end_type: int) -> bytes:
 
 # --- 헤더/서브패킷 파싱 ------------------------------------------------------
 
+def _crc32_zmodem(data: bytes) -> int:
+    # ZMODEM의 32비트 CRC는 표준 CRC-32(PKZIP/gzip과 동일 다항식, 초기값
+    # 0xFFFFFFFF, 최종 1의 보수)를 그대로 쓴다 - zlib.crc32()가 정확히 이
+    # 값을 돌려준다(lrzsz의 최종 ~crc 결과와 동일).
+    return zlib.crc32(data) & 0xFFFFFFFF
+
+
 def _read_hex_header_body(timeout):
     raw = bytearray()
     for _ in range(14):  # 5바이트(타입+4필드) = hex 10자 + CRC16 hex 4자
@@ -236,7 +246,7 @@ def _read_hex_header_body(timeout):
     if crc16_ccitt(payload) != crc:
         raise _GarbledHeader('HEX 헤더 CRC 불일치.')
     _skip_hex_trailer(timeout)
-    return payload[0], payload[1], payload[2], payload[3], payload[4]
+    return payload[0], payload[1], payload[2], payload[3], payload[4], False
 
 
 def _read_bin_header_body(timeout):
@@ -259,13 +269,47 @@ def _read_bin_header_body(timeout):
     crc = (crc_bytes[0] << 8) | crc_bytes[1]
     if crc16_ccitt(bytes(fields)) != crc:
         raise _GarbledHeader('BIN 헤더 CRC 불일치.')
-    return fields[0], fields[1], fields[2], fields[3], fields[4]
+    return fields[0], fields[1], fields[2], fields[3], fields[4], False
+
+
+def _read_bin32_header_body(timeout):
+    # ZBIN32 - 필드는 BIN과 동일하게 5바이트지만 CRC가 32비트(4바이트,
+    # little-endian으로 전송됨 - lrzsz PUTCHAR(crc), PUTCHAR(crc>>8), ...
+    # 순서를 그대로 따름)이다. 실사용 터미널(SecureCRT, 다수의 lrzsz 빌드)이
+    # 우리가 ZRINIT에서 CANFC32를 밝히지 않아도 ZFILE/ZDATA를 기본적으로
+    # 이 형식으로 보내는 경우가 흔해서, 이걸 처리 못 하면(예전 코드처럼
+    # 그냥 스캔을 계속하면) 해당 헤더 전체를 통째로 못 알아듣고 잡음처럼
+    # 건너뛰게 되어 ZFILE을 영원히 못 받는다 - 업로드가 ZRINIT 재전송 루프에
+    # 빠지는 원인이었다(실제 배포에서 관찰됨).
+    fields = bytearray()
+    for _ in range(5):
+        kind, val = _read_escaped_unit(timeout)
+        if kind == 'cancel':
+            raise ZModemCancelled('상대가 전송을 취소했습니다(CAN*2).')
+        if kind != 'data':
+            raise _GarbledHeader('BIN32 헤더 필드가 올바르지 않습니다.')
+        fields.append(val)
+    crc_bytes = bytearray()
+    for _ in range(4):
+        kind, val = _read_escaped_unit(timeout)
+        if kind == 'cancel':
+            raise ZModemCancelled('상대가 전송을 취소했습니다(CAN*2).')
+        if kind != 'data':
+            raise _GarbledHeader('BIN32 헤더 CRC가 올바르지 않습니다.')
+        crc_bytes.append(val)
+    crc = crc_bytes[0] | (crc_bytes[1] << 8) | (crc_bytes[2] << 16) | (crc_bytes[3] << 24)
+    if _crc32_zmodem(bytes(fields)) != crc:
+        raise _GarbledHeader('BIN32 헤더 CRC 불일치.')
+    return fields[0], fields[1], fields[2], fields[3], fields[4], True
 
 
 def _read_header(retry, timeout):
     """잡음(에코, ANSI 시퀀스, 텔넷 협상 바이트 등) 속에서 ZPAD...ZDLE
     시퀀스를 찾을 때까지 스캔한 뒤 헤더 본문을 읽어 검증한다.
-    (frame_type, b1, b2, b3, b4)를 반환한다."""
+    (frame_type, b1, b2, b3, b4, crc32)를 반환한다 - crc32는 이 헤더가
+    32비트 CRC(ZBIN32)로 왔는지 여부로, 뒤따르는 데이터 서브패킷을 같은
+    CRC 폭으로 읽어야 하는 호출부(ZSINIT의 attn, ZFILE의 메타데이터, ZDATA의
+    페이로드)에 전달해야 한다."""
     max_attempts = retry * 64
     attempts = 0
     while attempts < max_attempts:
@@ -290,28 +334,39 @@ def _read_header(retry, timeout):
             return _read_hex_header_body(timeout)
         if kind == ZBIN:
             return _read_bin_header_body(timeout)
-        # ZBIN32(32비트 CRC)나 알 수 없는 타입 - 지원하지 않으므로 계속 스캔.
+        if kind == ZBIN32:
+            return _read_bin32_header_body(timeout)
+        # 알 수 없는 타입 - 계속 스캔.
     raise ZModemTimeout('헤더 대기 시간 초과.')
 
 
-def _read_data_subpacket(timeout, max_len=None):
-    """데이터 서브패킷 하나를 읽어 (payload, end_type)을 반환한다."""
+def _read_data_subpacket(timeout, max_len=None, crc32=False):
+    """데이터 서브패킷 하나를 읽어 (payload, end_type)을 반환한다.
+    crc32=True면 서브패킷 CRC를 4바이트(32비트, little-endian)로 읽는다 -
+    직전에 읽은 헤더가 ZBIN32였을 때 반드시 맞춰줘야 한다(16비트 폭으로
+    읽으면 뒤 2바이트가 다음 데이터로 오인되어 스트림 전체가 깨진다)."""
     payload = bytearray()
     while True:
         kind, val = _read_escaped_unit(timeout)
         if kind == 'cancel':
             raise ZModemCancelled('상대가 전송을 취소했습니다(CAN*2).')
         if kind == 'end':
+            n_crc_bytes = 4 if crc32 else 2
             crc_bytes = bytearray()
-            for _ in range(2):
+            for _ in range(n_crc_bytes):
                 k2, v2 = _read_escaped_unit(timeout)
                 if k2 == 'cancel':
                     raise ZModemCancelled('상대가 전송을 취소했습니다(CAN*2).')
                 if k2 != 'data':
                     raise _GarbledHeader('서브패킷 CRC가 올바르지 않습니다.')
                 crc_bytes.append(v2)
-            crc = (crc_bytes[0] << 8) | crc_bytes[1]
-            if crc16_ccitt(bytes(payload) + bytes([val])) != crc:
+            if crc32:
+                crc = crc_bytes[0] | (crc_bytes[1] << 8) | (crc_bytes[2] << 16) | (crc_bytes[3] << 24)
+                expected = _crc32_zmodem(bytes(payload) + bytes([val]))
+            else:
+                crc = (crc_bytes[0] << 8) | crc_bytes[1]
+                expected = crc16_ccitt(bytes(payload) + bytes([val]))
+            if expected != crc:
                 raise _GarbledHeader('서브패킷 CRC 불일치.')
             return bytes(payload), val
         payload.append(val)
@@ -401,7 +456,7 @@ class ZModemSender:
         start_pos = 0
         for _ in range(self.retry):
             try:
-                ftype, b1, b2, b3, b4 = _read_header(self.retry, self.timeout)
+                ftype, b1, b2, b3, b4, _crc32 = _read_header(self.retry, self.timeout)
             except (transport.TransportTimeout, ZModemTimeout, _GarbledHeader):
                 _send_zfile()
                 continue
@@ -433,7 +488,7 @@ class ZModemSender:
                 # 데이터를 다시 기다리는 불필요한 지연이 생길 수 있다.
                 transport.write_bytes(_pos_header(ZDATA, sent) + packet)
                 try:
-                    ftype, b1, b2, b3, b4 = _read_header(self.retry, self.timeout)
+                    ftype, b1, b2, b3, b4, _crc32 = _read_header(self.retry, self.timeout)
                 except (transport.TransportTimeout, ZModemTimeout, _GarbledHeader):
                     continue
                 if ftype == ZACK:
@@ -514,18 +569,26 @@ class ZModemReceiver:
         # 이 ZRINIT 헤더 자체가 SecureCRT 등 터미널의 자동 업로드 감지
         # 트리거다 - 사용자가 rz를 수동으로 띄우지 않아도 이 바이트열을 보고
         # 자동으로 sz(업로드)를 시작할 수 있다.
-        transport.write_bytes(_flag_header(ZRINIT, zf0=CANFDX))
+        # CANFC32도 광고한다 - 실제 SecureCRT/lrzsz 등 다수의 sz 구현체는
+        # 이 플래그를 광고하지 않아도 어차피 ZBIN32(32비트 CRC) 헤더를 기본으로
+        # 보내는 경우가 흔해서(받는 쪽이 CANFC32를 안 밝혀도 일단 32비트로
+        # 시도), 우리가 실제로 처리 가능함을 정확히 알리는 게 맞다.
+        transport.write_bytes(_flag_header(ZRINIT, zf0=CANFDX | CANFC32))
 
     def _receive_inner(self, progress_cb):
         # 1) ZRINIT을 반복 전송하며 ZFILE을 기다린다.
         self._send_rinit()
+        zfile_crc32 = False
         for _ in range(self.retry * 3):
             try:
-                ftype, *_ = _read_header(self.retry, self.timeout)
+                ftype, b1, b2, b3, b4, hdr_crc32 = _read_header(self.retry, self.timeout)
             except (transport.TransportTimeout, ZModemTimeout, _GarbledHeader):
                 self._send_rinit()
                 continue
             if ftype == ZFILE:
+                # 뒤따르는 메타데이터 서브패킷은 이 ZFILE 헤더와 같은 CRC
+                # 폭(16/32비트)으로 온다 - 2단계에서 그대로 써야 한다.
+                zfile_crc32 = hdr_crc32
                 break
             if ftype == ZRQINIT:
                 self._send_rinit()
@@ -539,7 +602,7 @@ class ZModemReceiver:
                 # 계속 재전송하며 ZFILE로 못 넘어가 업로드가 영원히 멈춘다
                 # (실제 배포에서 관찰된 무한 대기 원인).
                 try:
-                    _read_data_subpacket(self.timeout, max_len=META_MAX_BYTES)
+                    _read_data_subpacket(self.timeout, max_len=META_MAX_BYTES, crc32=hdr_crc32)
                 except (transport.TransportTimeout, _GarbledHeader):
                     pass
                 transport.write_bytes(_build_hex_header(ZACK))
@@ -550,7 +613,7 @@ class ZModemReceiver:
         # 2) ZFILE의 데이터 서브패킷(파일명/크기)을 읽는다.
         for _ in range(self.retry):
             try:
-                meta_payload, _ = _read_data_subpacket(self.timeout, max_len=META_MAX_BYTES)
+                meta_payload, _ = _read_data_subpacket(self.timeout, max_len=META_MAX_BYTES, crc32=zfile_crc32)
                 break
             except (transport.TransportTimeout, _GarbledHeader):
                 transport.write_bytes(_build_hex_header(ZNAK))
@@ -570,12 +633,13 @@ class ZModemReceiver:
         received = 0
         header = self._wait_for_data_or_eof()
         while header[0] == ZDATA:
+            data_crc32 = header[5]
             while True:
                 remaining_budget = None
                 if self.max_size is not None:
                     remaining_budget = max(0, self.max_size - received) + 1
                 try:
-                    payload, end_type = _read_data_subpacket(self.timeout, max_len=remaining_budget)
+                    payload, end_type = _read_data_subpacket(self.timeout, max_len=remaining_budget, crc32=data_crc32)
                 except (transport.TransportTimeout, _GarbledHeader):
                     transport.write_bytes(_pos_header(ZRPOS, received))
                     break
@@ -620,11 +684,11 @@ class ZModemReceiver:
     def _wait_for_data_or_eof(self):
         for _ in range(self.retry):
             try:
-                ftype, b1, b2, b3, b4 = _read_header(self.retry, self.timeout)
+                ftype, b1, b2, b3, b4, crc32 = _read_header(self.retry, self.timeout)
             except (transport.TransportTimeout, ZModemTimeout, _GarbledHeader):
                 transport.write_bytes(_build_hex_header(ZNAK))
                 continue
             if ftype in (ZDATA, ZEOF):
-                return (ftype, b1, b2, b3, b4)
+                return (ftype, b1, b2, b3, b4, crc32)
             # 그 외(중복 ZFILE 등)는 무시하고 계속 대기.
         raise ZModemTimeout('데이터 프레임 대기 시간 초과.')
