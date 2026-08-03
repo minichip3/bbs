@@ -248,7 +248,16 @@ def data_relay(conn, master_fd, proc, tag, ip):
                     gap_ms = (now - last_recv_time[0]) * 1000
                     log_io(ip, '수신', filtered, gap_ms)
                     last_recv_time[0] = now
-                    os.write(master_fd, filtered)
+                    # os.write()는 요청한 바이트 수보다 적게 쓰고 반환할 수
+                    # 있다(파이프/PTY 버퍼가 꽉 찬 경우 등) - 반환값을 안 보고
+                    # 한 번만 호출하면 나머지가 조용히 유실된다. ZMODEM처럼
+                    # 큰 바이너리가 빠르게 연속으로 들어올 때만 걸리고 평소
+                    # 키 입력(몇 바이트)에서는 절대 안 걸려서 오래 못 잡았던
+                    # 버그 - 다 쓸 때까지 반복한다.
+                    view = memoryview(filtered)
+                    while view:
+                        n = os.write(master_fd, view)
+                        view = view[n:]
             except OSError:
                 break
             except Exception:
@@ -317,6 +326,14 @@ def handle_connection(conn, addr):
     proc = None
     master_fd = None
     try:
+        # Nagle 알고리즘 끄기 - 이게 켜져 있으면(기본값) 작은 패킷을 모아
+        # 보내려고 커널이 최대 수십 ms씩 지연시키는데, ZMODEM처럼 작은
+        # ACK(ZRPOS 등)와 큰 데이터 버스트가 빠르게 번갈아 오가는 프로토콜에서
+        # 상대의 지연 ACK(delayed ACK)와 맞물려 간헐적으로 스톨이 생기는
+        # 전형적인 원인이다(Nagle vs delayed ACK 상호작용 - 실패 지점이
+        # 매번 다르게 재현되던 것과 패턴이 일치함). 느긋한 키 입력 위주인
+        # 평소 트래픽에서는 절대 안 걸려서 오래 못 잡았다.
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         conn.sendall(NEGOTIATION)
 
         # PTY 생성. dialup.py와 동일하게 raw 모드는 여기서 딱 한 번만 건다 -

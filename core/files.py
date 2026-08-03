@@ -10,7 +10,7 @@ from bbsio.tui import (
     box_top, box_bottom, box_line, box_sep, get_screen_size,
 )
 from bbsio.xfer.xmodem import XModemSender, XModemReceiver, XModemError
-from bbsio.xfer.zmodem import ZModemSender, ZModemReceiver, ZModemError
+from bbsio.xfer import zmodem_proc
 from core.profile import is_admin
 
 INDEX_FILE = os.path.join('data', 'file_index.json')
@@ -275,11 +275,10 @@ def zmodem_upload(username):
               RESET)
     rawinput('')
 
-    receiver = ZModemReceiver(max_size=MAX_UPLOAD_SIZE)
     try:
         _log(f'{username} ZMODEM 업로드 시작')
-        raw_filename, data = receiver.receive()
-    except ZModemError as e:
+        raw_filename, data = zmodem_proc.receive(max_size=MAX_UPLOAD_SIZE)
+    except zmodem_proc.ZModemProcError as e:
         _log(f'{username} ZMODEM 업로드 실패: {e}')
         rawprint(C_ERR + f"\n업로드가 실패했습니다: {e}\n" + RESET)
         rawinput("계속하려면 Enter를 누르세요.\n")
@@ -353,11 +352,8 @@ def zmodem_download(entry):
     """XModem과 달리 파일명/크기가 핸드셰이크 중 자동으로 전달되므로
     수신측에서 따로 파일명을 지정할 필요가 없다."""
     path = os.path.join(FILES_DIR, entry['stored_name'])
-    try:
-        with open(path, 'rb') as f:
-            data = f.read()
-    except OSError as e:
-        rawprint(C_ERR + f"\n파일을 읽을 수 없습니다: {e}\n" + RESET)
+    if not os.path.isfile(path):
+        rawprint(C_ERR + "\n파일을 읽을 수 없습니다.\n" + RESET)
         rawinput("계속하려면 Enter를 누르세요.\n")
         return
 
@@ -368,16 +364,16 @@ def zmodem_download(entry):
               RESET)
     rawinput('')
 
-    sender = ZModemSender()
+    size = os.path.getsize(path)
     try:
         _log(f'ZMODEM 다운로드 시작: {entry["filename"]}')
-        sender.send(entry['filename'], data)
-    except ZModemError as e:
+        zmodem_proc.send(path, display_name=entry['filename'])
+    except zmodem_proc.ZModemProcError as e:
         _log(f'ZMODEM 다운로드 실패: {e}')
         rawprint(C_ERR + f"\n다운로드가 실패했습니다: {e}\n" + RESET)
         rawinput("계속하려면 Enter를 누르세요.\n")
         return
 
-    _log(f'ZMODEM 다운로드 완료: {entry["filename"]} ({len(data)}바이트)')
-    rawprint(C_OK + f"\n다운로드가 완료되었습니다! ({len(data)}바이트)\n" + RESET)
+    _log(f'ZMODEM 다운로드 완료: {entry["filename"]} ({size}바이트)')
+    rawprint(C_OK + f"\n다운로드가 완료되었습니다! ({size}바이트)\n" + RESET)
     rawinput("계속하려면 Enter를 누르세요.\n")

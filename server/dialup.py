@@ -249,7 +249,14 @@ def data_relay(ser, master_fd, proc):
                     gap_ms = (now - last_data_time) * 1000
                     log_io(MODEM_PORT, '수신', data, gap_ms)
                     last_data_time = now
-                    os.write(master_fd, data)
+                    # os.write()는 요청한 바이트 수보다 적게 쓰고 반환할 수
+                    # 있다(파이프/PTY 버퍼가 꽉 찬 경우 등) - 반환값을 확인 안
+                    # 하면 나머지가 조용히 유실된다(telnet.py의 동일 버그 수정
+                    # 참고). 다 쓸 때까지 반복한다.
+                    view = memoryview(data)
+                    while view:
+                        n = os.write(master_fd, view)
+                        view = view[n:]
                     # 한 줄 버퍼에 누적해서 NO CARRIER 체크
                     buffer += data
                     # 줄 끝까지 읽어서 처리
