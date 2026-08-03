@@ -27,15 +27,28 @@ DO = 0xFD
 DONT = 0xFE
 TELOPT_ECHO = 0x01
 TELOPT_SGA = 0x03
+TELOPT_BINARY = 0x00
 
 # 서버가 에코를 담당하고(우리 rawinput()이 직접 echo함), 클라이언트는
 # 로컬 에코/라인버퍼링 없이 키 하나하나를 바로 보내도록 하는 협상.
 # 완전한 telnet 옵션 상태머신은 필요 없음 - 접속 시 한 번만 보내고,
 # 그 이후 들어오는 IAC 시퀀스는 그냥 무시(스킵)한다.
+#
+# BINARY(옵션 0)을 양방향(WILL/DO) 다 제안하는 게 핵심이다 - 이게 없으면
+# 접속은 기본 NVT ASCII(7비트) 모드로 남는데, 이 경우 일부 클라이언트가
+# 8번째 비트가 켜진 바이트(ZMODEM CRC32처럼가 임의 값일 수 있는 바이너리
+# 필드)를 보낼 때 그 비트를 깎아서 보낸다 - 사람이 보는 한글(EUC-KR) 텍스트는
+# 우연히 안 걸리는 값이 많아 멀쩡해 보였지만, ZMODEM 헤더/서브패킷 CRC는
+# 값 범위 제한이 없어 이 손상에 그대로 노출됐다(실 배포 로그에서 CRC 불일치가
+# 매번 정확히 상위비트 하나만 다른 패턴으로 재현됨 - 업로드가 ZFILE 재전송
+# 루프에 갇히는 원인이었다). WILL/DO BINARY를 명시적으로 제안해서 양쪽 다
+# 8비트 클린 모드로 전환되게 한다.
 NEGOTIATION = bytes([
     IAC, WILL, TELOPT_ECHO,
     IAC, WILL, TELOPT_SGA,
     IAC, DO, TELOPT_SGA,
+    IAC, WILL, TELOPT_BINARY,
+    IAC, DO, TELOPT_BINARY,
 ])
 
 _connection_count_lock = threading.Lock()
@@ -98,7 +111,9 @@ _IAC_DECLINE = {WILL: DONT, WONT: DONT, DO: WONT, DONT: WONT}
 # '*' 마스킹 대신 평문이 그대로 로컬 에코되어 보이는 버그의 원인이었다.
 # 이미 우리가 협상을 시작한 옵션에 대한 응답에는 답장하지 않는다(RFC 854가
 # 금지하는 "응답에 대한 재응답" 루프를 피하기 위함이기도 하다).
-_IAC_NO_REPLY_OPTIONS = (TELOPT_ECHO, TELOPT_SGA)
+# BINARY도 같은 이유로 여기 포함 - 우리가 NEGOTIATION에서 WILL/DO BINARY를
+# 먼저 제안했으므로 그에 대한 응답을 거부로 되받으면 안 된다.
+_IAC_NO_REPLY_OPTIONS = (TELOPT_ECHO, TELOPT_SGA, TELOPT_BINARY)
 
 
 def strip_telnet_iac(data):
@@ -233,7 +248,16 @@ def data_relay(conn, master_fd, proc, tag, ip):
                     gap_ms = (now - last_recv_time[0]) * 1000
                     log_io(ip, '수신', filtered, gap_ms)
                     last_recv_time[0] = now
-                    os.write(master_fd, filtered)
+                    # os.write()는 요청한 바이트 수보다 적게 쓰고 반환할 수
+                    # 있다(파이프/PTY 버퍼가 꽉 찬 경우 등) - 반환값을 안 보고
+                    # 한 번만 호출하면 나머지가 조용히 유실된다. ZMODEM처럼
+                    # 큰 바이너리가 빠르게 연속으로 들어올 때만 걸리고 평소
+                    # 키 입력(몇 바이트)에서는 절대 안 걸려서 오래 못 잡았던
+                    # 버그 - 다 쓸 때까지 반복한다.
+                    view = memoryview(filtered)
+                    while view:
+                        n = os.write(master_fd, view)
+                        view = view[n:]
             except OSError:
                 break
             except Exception:
@@ -302,6 +326,14 @@ def handle_connection(conn, addr):
     proc = None
     master_fd = None
     try:
+        # Nagle 알고리즘 끄기 - 이게 켜져 있으면(기본값) 작은 패킷을 모아
+        # 보내려고 커널이 최대 수십 ms씩 지연시키는데, ZMODEM처럼 작은
+        # ACK(ZRPOS 등)와 큰 데이터 버스트가 빠르게 번갈아 오가는 프로토콜에서
+        # 상대의 지연 ACK(delayed ACK)와 맞물려 간헐적으로 스톨이 생기는
+        # 전형적인 원인이다(Nagle vs delayed ACK 상호작용 - 실패 지점이
+        # 매번 다르게 재현되던 것과 패턴이 일치함). 느긋한 키 입력 위주인
+        # 평소 트래픽에서는 절대 안 걸려서 오래 못 잡았다.
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         conn.sendall(NEGOTIATION)
 
         # PTY 생성. dialup.py와 동일하게 raw 모드는 여기서 딱 한 번만 건다 -

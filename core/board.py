@@ -14,7 +14,7 @@ from core import admin
 from core import files as file_board
 from core.profile import is_admin, edit_profile
 from bbsio.xfer.xmodem import XModemReceiver, XModemError
-from bbsio.xfer.zmodem import ZModemReceiver, ZModemError
+from bbsio.xfer import zmodem_proc
 
 POST_FILE = os.path.join('data', 'posts.json')
 SITE_NAME = "M I N I - T E L"
@@ -100,10 +100,9 @@ def _upload_attachment():
                   "(파일명과 크기는 자동으로 전달됩니다. 준비되면 Enter를 누르세요.)\n" +
                   RESET)
         rawinput('')
-        receiver = ZModemReceiver(max_size=file_board.MAX_UPLOAD_SIZE)
         try:
-            raw_filename, data = receiver.receive()
-        except ZModemError as e:
+            raw_filename, data = zmodem_proc.receive(max_size=file_board.MAX_UPLOAD_SIZE)
+        except zmodem_proc.ZModemProcError as e:
             rawprint(C_ERR + f"\n첨부파일 업로드가 실패했습니다: {e}\n" + RESET)
             rawinput("계속하려면 Enter를 누르세요.\n")
             return None
